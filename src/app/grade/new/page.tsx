@@ -49,8 +49,7 @@ export default function NewGradePage() {
   function computeGrade(p: InvestorProfile, totalWeight: number): number {
     const base = p === "Aggressive Growth" ? 4.5 : p === "Balanced" ? 3.8 : 4.1;
     const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100); // penalize if not 100%
-    const grade = Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
-    return grade;
+    return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
   }
 
   function submit() {
@@ -60,7 +59,8 @@ export default function NewGradePage() {
       profile,
       grade: grade.toFixed(1),
     });
-    router.push(`/grade/result?${params.toString()}`); // singular route
+    // Canonical route is singular:
+    router.push(`/grade/result?${params.toString()}`);
   }
 
   return (
