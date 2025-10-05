@@ -59,7 +59,7 @@ export default function NewGradePage() {
       profile,
       grade: grade.toFixed(1),
     });
-    // Canonical route is singular:
+    // Canonical route is plural:
     router.push(`/grade/results?${params.toString()}`);
   }
 
