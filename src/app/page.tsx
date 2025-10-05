@@ -1,3 +1,4 @@
+// src/app/page.tsx
 import Link from "next/link";
 
 export default function Home() {
@@ -10,14 +11,22 @@ export default function Home() {
         <p className="mt-4 text-gray-600">
           Get a personalized grade and a simple, actionable plan to optimize your 401k — in minutes.
         </p>
-        <div className="mt-8">
+
+        <div className="mt-8 flex items-center justify-center gap-3">
           <Link
             href="/pricing"
             className="inline-block rounded-lg bg-blue-600 text-white px-5 py-3 hover:bg-blue-700"
           >
             Get my grade
           </Link>
+          <Link
+            href="/grade/new"
+            className="inline-block rounded-lg border px-5 py-3 hover:bg-gray-50"
+          >
+            Try the form
+          </Link>
         </div>
+
         <p className="mt-3 text-xs text-gray-500">
           For informational purposes only. Not investment advice.
         </p>
