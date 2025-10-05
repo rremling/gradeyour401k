@@ -1,14 +1,32 @@
 // src/app/grade/new/page.tsx
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
 type Holding = { symbol: string; weight: number };
 
+const LS_KEY = "gy4k_form_v1";
+
+function parseRowsParam(raw: string | null): Holding[] | null {
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(decodeURIComponent(raw));
+    if (Array.isArray(arr)) {
+      return arr
+        .filter((r) => r && typeof r.symbol === "string")
+        .map((r) => ({ symbol: String(r.symbol).toUpperCase(), weight: Number(r.weight) || 0 }));
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export default function NewGradePage() {
   const router = useRouter();
+  const q = useSearchParams();
 
   const [provider, setProvider] = useState("");
   const [profile, setProfile] = useState<InvestorProfile>("Growth");
@@ -16,6 +34,52 @@ export default function NewGradePage() {
     { symbol: "FSKAX", weight: 40 },
     { symbol: "FXNAX", weight: 20 },
   ]);
+
+  // 1) On mount, restore from URL (if present), otherwise from localStorage
+  useEffect(() => {
+    const qpProvider = q.get("provider");
+    const qpProfile = q.get("profile") as InvestorProfile | null;
+    const qpRows = parseRowsParam(q.get("rows"));
+
+    if (qpProvider) setProvider(qpProvider);
+    if (qpProfile === "Aggressive Growth" || qpProfile === "Growth" || qpProfile === "Balanced") {
+      setProfile(qpProfile);
+    }
+    if (qpRows && qpRows.length) {
+      setRows(qpRows);
+      return; // prefer explicit URL state over LS
+    }
+
+    // Fallback to localStorage
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          provider?: string;
+          profile?: InvestorProfile;
+          rows?: Holding[];
+        };
+        if (parsed.provider) setProvider(parsed.provider);
+        if (parsed.profile) setProfile(parsed.profile);
+        if (parsed.rows && parsed.rows.length) setRows(parsed.rows);
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 2) Save draft to localStorage whenever inputs change
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LS_KEY,
+        JSON.stringify({ provider, profile, rows })
+      );
+    } catch {
+      /* storage may be unavailable (private mode) */
+    }
+  }, [provider, profile, rows]);
 
   const total = useMemo<number>(
     () => rows.reduce<number>((sum, r) => sum + (Number(r.weight) || 0), 0),
@@ -36,10 +100,7 @@ export default function NewGradePage() {
     setRows((r) =>
       r.map((row, idx) =>
         idx === i
-          ? {
-              ...row,
-              [key]: key === "weight" ? Number(v) : v.toUpperCase(),
-            }
+          ? { ...row, [key]: key === "weight" ? Number(v) : v.toUpperCase() }
           : row
       )
     );
@@ -48,19 +109,21 @@ export default function NewGradePage() {
   // Simple client-side grade so the flow works end-to-end.
   function computeGrade(p: InvestorProfile, totalWeight: number): number {
     const base = p === "Aggressive Growth" ? 4.5 : p === "Balanced" ? 3.8 : 4.1;
-    const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100); // penalize if not 100%
+    const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100);
     return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
   }
 
   function submit() {
     const grade = computeGrade(profile, total);
+    // Pack rows as JSON in query for shareability + restore
+    const rowsParam = encodeURIComponent(JSON.stringify(rows));
     const params = new URLSearchParams({
       provider,
       profile,
       grade: grade.toFixed(1),
+      rows: rowsParam,
     });
-    // Canonical route is plural:
-    router.push(`/grade/results?${params.toString()}`);
+    router.push(`/grade/results?${params.toString()}`); // plural canonical
   }
 
   return (
