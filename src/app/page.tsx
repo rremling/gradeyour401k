@@ -1,4 +1,3 @@
-// src/app/page.tsx
 import Link from "next/link";
 
 export default function Home() {
@@ -13,13 +12,15 @@ export default function Home() {
         </p>
         <div className="mt-8">
           <Link
-            href="/grade/new"
+            href="/pricing"
             className="inline-block rounded-lg bg-blue-600 text-white px-5 py-3 hover:bg-blue-700"
           >
-            Get your grade
+            Get my grade
           </Link>
         </div>
-        <p className="mt-3 text-xs text-gray-500">For informational purposes only. Not investment advice.</p>
+        <p className="mt-3 text-xs text-gray-500">
+          For informational purposes only. Not investment advice.
+        </p>
       </div>
     </main>
   );
