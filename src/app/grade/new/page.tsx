@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 // src/app/grade/new/page.tsx
 "use client";
 
@@ -11,6 +9,7 @@ type Holding = { symbol: string; weight: number };
 
 export default function NewGradePage() {
   const router = useRouter();
+
   const [provider, setProvider] = useState("");
   const [profile, setProfile] = useState<InvestorProfile>("Growth");
   const [rows, setRows] = useState<Holding[]>([
@@ -47,9 +46,8 @@ export default function NewGradePage() {
   }
 
   // Simple client-side grade so the flow works end-to-end.
-  function computeGrade(profileInput: InvestorProfile, totalWeight: number): number {
-    const base =
-      profileInput === "Aggressive Growth" ? 4.5 : profileInput === "Balanced" ? 3.8 : 4.1;
+  function computeGrade(p: InvestorProfile, totalWeight: number): number {
+    const base = p === "Aggressive Growth" ? 4.5 : p === "Balanced" ? 3.8 : 4.1;
     const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100); // penalize if not 100%
     const grade = Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
     return grade;
@@ -62,7 +60,7 @@ export default function NewGradePage() {
       profile,
       grade: grade.toFixed(1),
     });
-    router.push(`/grade/result?${params.toString()}`);
+    router.push(`/grade/result?${params.toString()}`); // singular route
   }
 
   return (
