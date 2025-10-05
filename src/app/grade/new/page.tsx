@@ -4,44 +4,57 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
 type Holding = { symbol: string; weight: number };
 
 export default function NewGradePage() {
   const router = useRouter();
   const [provider, setProvider] = useState("");
-  const [profile, setProfile] = useState<"Aggressive Growth" | "Growth" | "Balanced">("Growth");
+  const [profile, setProfile] = useState<InvestorProfile>("Growth");
   const [rows, setRows] = useState<Holding[]>([
     { symbol: "FSKAX", weight: 40 },
     { symbol: "FXNAX", weight: 20 },
   ]);
 
-  const total = useMemo(() => rows.reduce((s, r) => s + (Number(r.weight) || 0), 0), [rows]);
-  const canSubmit = provider && Math.abs(total - 100) < 0.1;
+  const total = useMemo<number>(
+    () => rows.reduce<number>((sum, r) => sum + (Number(r.weight) || 0), 0),
+    [rows]
+  );
+
+  const canSubmit = provider.length > 0 && Math.abs(total - 100) < 0.1;
 
   function addRow() {
-    setRows(r => [...r, { symbol: "", weight: 0 }]);
+    setRows((r) => [...r, { symbol: "", weight: 0 }]);
   }
+
   function removeRow(i: number) {
-    setRows(r => r.filter((_, idx) => idx !== i));
+    setRows((r) => r.filter((_, idx) => idx !== i));
   }
+
   function updateRow(i: number, key: keyof Holding, v: string) {
-    setRows(r =>
+    setRows((r) =>
       r.map((row, idx) =>
-        idx === i ? { ...row, [key]: key === "weight" ? Number(v) : v.toUpperCase() } : row
+        idx === i
+          ? {
+              ...row,
+              [key]: key === "weight" ? Number(v) : v.toUpperCase(),
+            }
+          : row
       )
     );
   }
 
   // Simple client-side grade so the flow works end-to-end.
-  function computeGrade(): number {
-    const base = profile === "Aggressive Growth" ? 4.5 : profile === "Balanced" ? 3.8 : 4.1;
-    const penalty = Math.min(1, Math.abs(100 - total) / 100); // penalize if not 100%
+  function computeGrade(profileInput: InvestorProfile, totalWeight: number): number {
+    const base =
+      profileInput === "Aggressive Growth" ? 4.5 : profileInput === "Balanced" ? 3.8 : 4.1;
+    const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100); // penalize if not 100%
     const grade = Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
     return grade;
   }
 
   function submit() {
-    const grade = computeGrade();
+    const grade = computeGrade(profile, total);
     const params = new URLSearchParams({
       provider,
       profile,
@@ -74,11 +87,11 @@ export default function NewGradePage() {
         <select
           className="w-full border rounded-md p-2"
           value={profile}
-          onChange={(e) => setProfile(e.target.value as any)}
+          onChange={(e) => setProfile(e.target.value as InvestorProfile)}
         >
-          <option>Aggressive Growth</option>
-          <option>Growth</option>
-          <option>Balanced</option>
+          <option value="Aggressive Growth">Aggressive Growth</option>
+          <option value="Growth">Growth</option>
+          <option value="Balanced">Balanced</option>
         </select>
       </section>
 
