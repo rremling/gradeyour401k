@@ -1,11 +1,10 @@
-// src/app/grade/new/_NewGradeClient.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
-type Holding = { symbol: string; weight: number };
+type Holding = { symbol: string; weight: number | "" }; // <-- allow empty while editing
 
 const LS_KEY = "gy4k_form_v1";
 
@@ -16,7 +15,14 @@ function parseRowsParam(raw: string | null): Holding[] | null {
     if (Array.isArray(arr)) {
       return arr
         .filter((r) => r && typeof r.symbol === "string")
-        .map((r) => ({ symbol: String(r.symbol).toUpperCase(), weight: Number(r.weight) || 0 }));
+        .map((r) => ({
+          symbol: String(r.symbol).toUpperCase(),
+          // accept "", number-like, or default to ""
+          weight:
+            r.weight === "" || r.weight === null || r.weight === undefined
+              ? ""
+              : Number(r.weight) || 0,
+        }));
     }
   } catch {}
   return null;
@@ -50,7 +56,11 @@ export default function NewGradeClient() {
     try {
       const raw = localStorage.getItem(LS_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as { provider?: string; profile?: InvestorProfile; rows?: Holding[] };
+        const parsed = JSON.parse(raw) as {
+          provider?: string;
+          profile?: InvestorProfile;
+          rows?: Holding[];
+        };
         if (parsed.provider) setProvider(parsed.provider);
         if (parsed.profile) setProfile(parsed.profile);
         if (parsed.rows && parsed.rows.length) setRows(parsed.rows);
@@ -66,18 +76,42 @@ export default function NewGradeClient() {
     } catch {}
   }, [provider, profile, rows]);
 
-  const total = useMemo<number>(() => rows.reduce<number>((s, r) => s + (Number(r.weight) || 0), 0), [rows]);
-  const canSubmit = provider.length > 0 && Math.abs(total - 100) < 0.1;
+  // Treat empty weights as 0 for totals
+  const total = useMemo<number>(
+    () =>
+      rows.reduce<number>(
+        (s, r) => s + (typeof r.weight === "number" ? r.weight : 0),
+        0
+      ),
+    [rows]
+  );
+
+  const allWeightsFilled = rows.every((r) => r.weight !== "");
+  const canSubmit = provider.length > 0 && allWeightsFilled && Math.abs(total - 100) < 0.1;
 
   function addRow() {
-    setRows((r) => [...r, { symbol: "", weight: 0 }]);
+    setRows((r) => [...r, { symbol: "", weight: "" }]); // start empty
   }
+
   function removeRow(i: number) {
     setRows((r) => r.filter((_, idx) => idx !== i));
   }
+
   function updateRow(i: number, key: keyof Holding, v: string) {
     setRows((r) =>
-      r.map((row, idx) => (idx === i ? { ...row, [key]: key === "weight" ? Number(v) : v.toUpperCase() } : row))
+      r.map((row, idx) => {
+        if (idx !== i) return row;
+        if (key === "weight") {
+          // allow empty string while typing; strip non-numeric chars
+          const cleaned = v.replace(/[^0-9.]/g, "");
+          if (cleaned === "") return { ...row, weight: "" };
+          // handle cases like ".", "00.", "1."
+          const asNumber = Number(cleaned);
+          return { ...row, weight: isNaN(asNumber) ? "" : asNumber };
+        } else {
+          return { ...row, symbol: v.toUpperCase() };
+        }
+      })
     );
   }
 
@@ -105,7 +139,11 @@ export default function NewGradeClient() {
 
       <section className="space-y-2">
         <label className="text-sm font-medium">1) Select your provider</label>
-        <select className="w-full border rounded-md p-2" value={provider} onChange={(e) => setProvider(e.target.value)}>
+        <select
+          className="w-full border rounded-md p-2"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value)}
+        >
           <option value="">Choose…</option>
           <option value="fidelity">Fidelity</option>
           <option value="vanguard">Vanguard</option>
@@ -138,21 +176,30 @@ export default function NewGradeClient() {
               onChange={(e) => updateRow(i, "symbol", e.target.value)}
             />
             <input
-              type="number"
-              step="0.1"
+              inputMode="decimal"
+              pattern="[0-9]*\.?[0-9]*"
+              type="text" // use text so we can keep "" and intermediate values like "."
               className="col-span-3 border rounded-md p-2"
               placeholder="Weight %"
-              value={row.weight}
+              value={row.weight === "" ? "" : String(row.weight)}
               onChange={(e) => updateRow(i, "weight", e.target.value)}
             />
-            <button type="button" className="col-span-2 border rounded-md px-3 py-2 hover:bg-gray-50" onClick={() => removeRow(i)}>
+            <button
+              type="button"
+              className="col-span-2 border rounded-md px-3 py-2 hover:bg-gray-50"
+              onClick={() => removeRow(i)}
+            >
               Remove
             </button>
           </div>
         ))}
 
         <div className="flex items-center justify-between">
-          <button type="button" onClick={addRow} className="border rounded-md px-3 py-2 hover:bg-gray-50">
+          <button
+            type="button"
+            onClick={addRow}
+            className="border rounded-md px-3 py-2 hover:bg-gray-50"
+          >
             Add holding
           </button>
           <div className="text-sm text-gray-600">Total: {total.toFixed(1)}%</div>
@@ -171,7 +218,9 @@ export default function NewGradeClient() {
           Preview grade
         </button>
         {!canSubmit && (
-          <p className="mt-2 text-xs text-gray-500">Choose a provider and make sure weights sum to 100%.</p>
+          <p className="mt-2 text-xs text-gray-500">
+            Choose a provider and make sure all weights are filled and sum to 100%.
+          </p>
         )}
       </div>
     </main>
