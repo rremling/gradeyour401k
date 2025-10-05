@@ -60,7 +60,7 @@ export default function NewGradePage() {
       grade: grade.toFixed(1),
     });
     // Canonical route is singular:
-    router.push(`/grade/result?${params.toString()}`);
+    router.push(`/grade/results?${params.toString()}`);
   }
 
   return (
