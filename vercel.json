@@ -1,9 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/report/cron",
+      "path": "/api/report/cron?token=c544ef4da6774372958c391d109174fc",
       "schedule": "0 12 * * *"
     }
-  ],
-  // if you already had other settings in vercel.json, merge them — don't overwrite critical ones
+  ]
 }
