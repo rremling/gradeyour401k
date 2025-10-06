@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/report/cron?token=c544ef4da6774372958c391d109174fc",
-      "schedule": "0 12 * * *"
-    }
-  ]
-}
