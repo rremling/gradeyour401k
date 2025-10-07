@@ -1,46 +1,68 @@
 // src/app/api/checkout/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic"; // ensure this runs on the server
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// Ensure you set STRIPE_SECRET_KEY in Vercel Env (Project Settings → Environment Variables)
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2024-09-30.acacia", // ok to use latest available in your SDK
-});
+function env(name: string) {
+  return process.env[name] || "";
+}
 
-export async function POST(req: Request) {
+function safeBaseUrl() {
+  // Prefer explicit; fall back to Vercel provided URL if available
+  return (
+    env("NEXT_PUBLIC_BASE_URL") ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000")
+  );
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const priceId: string = body?.priceId || process.env.NEXT_PUBLIC_STRIPE_PRICE_ID || "";
-    const metadata: Record<string, string> = body?.metadata || {};
+    const body = await req.json().catch(() => ({}));
+    const planKey = (body?.planKey as "one_time" | "annual") || "one_time";
+    const previewId = (body?.previewId as string) || "";
 
-    if (!priceId) {
-      return new NextResponse("Missing Stripe priceId", { status: 400 });
+    const secret = env("STRIPE_SECRET_KEY");
+    if (!secret) {
+      return NextResponse.json(
+        { error: "Missing STRIPE_SECRET_KEY" },
+        { status: 500 }
+      );
     }
 
-    // Prefer explicit base URL via env; fall back to Vercel URL
-    const baseUrl =
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      process.env.VERCEL_PROJECT_PRODUCTION_URL?.startsWith("http")
-        ? process.env.VERCEL_PROJECT_PRODUCTION_URL
-        : `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL}`;
+    const priceOne = env("STRIPE_PRICE_ID_ONE_TIME");
+    const priceAnnual = env("STRIPE_PRICE_ID_ANNUAL");
 
-    const successUrl = `${baseUrl}/success`;
-    const cancelUrl = `${baseUrl}/cancel`;
+    const priceId =
+      planKey === "annual" ? priceAnnual || priceOne : priceOne;
 
+    if (!priceId) {
+      return NextResponse.json(
+        { error: "Missing Stripe priceId: set STRIPE_PRICE_ID_ONE_TIME / STRIPE_PRICE_ID_ANNUAL" },
+        { status: 500 }
+      );
+    }
+
+    const stripe = new Stripe(secret, { apiVersion: "2024-06-20" });
+
+    const origin = safeBaseUrl();
     const session = await stripe.checkout.sessions.create({
-      mode: "payment",
+      mode: planKey === "annual" ? "subscription" : "payment",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      allow_promotion_codes: true,
-      metadata,
+      success_url: `${origin}/success`,
+      cancel_url: `${origin}/pricing`,
+      metadata: { planKey, previewId },
+      // Optional: collect email on checkout
+      customer_creation: "always"
     });
 
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error("Stripe checkout error:", err);
-    return new NextResponse(err?.message || "Checkout error", { status: 500 });
+    console.error("checkout error:", err?.message || err);
+    return NextResponse.json(
+      { error: err?.message || "Checkout failed" },
+      { status: 500 }
+    );
   }
 }
