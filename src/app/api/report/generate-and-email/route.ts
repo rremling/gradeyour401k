@@ -3,21 +3,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { buildReportPDF, type PreviewData } from "@/lib/pdf";
 import { sendReportEmail } from "@/lib/email";
+import { getMarketRegime } from "@/lib/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// (Optional) very simple market regime placeholder — wire your real logic later
-async function getMarketRegime(): Promise<string> {
-  // You can replace with Alpha Vantage / SMA logic; keep it static for now
-  return "Trend: Neutral (demo)";
-}
 
 async function loadPreview(previewId: string): Promise<PreviewData | null> {
   try {
     const rows = await query<{
       provider: string; profile: string; rows: any; grade_base: number; grade_adjusted: number;
-    }>(`select provider, profile, rows, grade_base, grade_adjusted from previews where id = $1`, [previewId]);
+    }>(
+      `select provider, profile, rows, grade_base, grade_adjusted
+       from previews
+       where id = $1`,
+      [previewId]
+    );
     if (!rows?.length) return null;
     const p = rows[0];
     return {
@@ -35,9 +35,9 @@ async function loadPreview(previewId: string): Promise<PreviewData | null> {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const email = (body.email as string) || "";            // required
-    const previewId = (body.previewId as string) || "";    // preferred
-    const override = (body.data as PreviewData | undefined) || undefined; // optional raw data if no DB
+    const email = (body.email as string) || "";
+    const previewId = (body.previewId as string) || "";
+    const override = (body.data as PreviewData | undefined) || undefined;
 
     if (!email) {
       return NextResponse.json({ error: "Missing email" }, { status: 400 });
@@ -65,7 +65,6 @@ export async function POST(req: NextRequest) {
       attachment: { filename: "GradeYour401k-Report.pdf", content: pdf },
     });
 
-    // optional: mark delivered if DB exists and you passed order id (skip for now)
     return NextResponse.json({ ok: true });
   } catch (e: any) {
     console.error("generate-and-email error:", e?.message || e);
