@@ -8,7 +8,7 @@ export function getPool() {
   if (!pool) {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      // ssl: { rejectUnauthorized: false }, // uncomment if your host needs SSL
+      ssl: { rejectUnauthorized: false }, // Neon requires SSL; this works with sslmode=require too
     });
   }
   return pool;
