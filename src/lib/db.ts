@@ -1,16 +1,26 @@
 // src/lib/db.ts
 import { Pool } from "pg";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  // ssl: { rejectUnauthorized: false }, // enable if your host requires
-});
+let pool: Pool | null = null;
+
+export function getPool() {
+  if (!process.env.DATABASE_URL) return null;
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      // ssl: { rejectUnauthorized: false }, // uncomment if your host needs SSL
+    });
+  }
+  return pool;
+}
 
 export async function query<T = any>(text: string, params?: any[]) {
-  const client = await pool.connect();
+  const p = getPool();
+  if (!p) throw new Error("DB not configured");
+  const client = await p.connect();
   try {
     const res = await client.query<T>(text, params);
-    return res;
+    return res.rows as T[];
   } finally {
     client.release();
   }
