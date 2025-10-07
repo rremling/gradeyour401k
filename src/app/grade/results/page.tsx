@@ -89,7 +89,7 @@ export default function ResultsPage({
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
-      <h1 className="text-2xl font-bold">Your Grade (v3)</h1>
+      <h1 className="text-2xl font-bold">Your Grade</h1>
 
       <div className="rounded-lg border p-6 space-y-3">
         <p><span className="font-medium">Provider:</span> {providerLabel || "—"}</p>
