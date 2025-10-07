@@ -1,91 +1,189 @@
 // src/app/grade/results/page.tsx
 import Link from "next/link";
-import { getMarketRegime } from "@/lib/market";
+import {
+  PROVIDERS,
+  HOLDINGS_MAP,
+  type ProviderKey,
+  type InvestorProfile,
+  validateSymbol,
+  labelFor,
+  computeGrade,
+  diffAgainstModel,
+} from "@/lib/gy4k";
 
-type Holding = { symbol: string; weight: number };
-type SearchParams = {
-  provider?: string;
-  profile?: string;
-  grade?: string;
-  rows?: string; // encoded JSON
-};
+// --- helpers ---
+function parseRows(raw: string | null) {
+  if (!raw) return [] as { symbol: string; weight: number }[];
+  try {
+    const arr = JSON.parse(decodeURIComponent(raw));
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((r) => r && typeof r.symbol === "string")
+      .map((r) => ({
+        symbol: String(r.symbol).toUpperCase(),
+        weight:
+          r.weight === "" || r.weight === null || r.weight === undefined
+            ? 0
+            : Number(r.weight) || 0,
+      }));
+  } catch {
+    return [];
+  }
+}
 
-export const metadata = {
-  title: "Your Grade | GradeYour401k",
-};
+// count how many user tickers belong to another provider
+function countCrossProviderSymbols(selected: ProviderKey | "", symbols: string[]) {
+  if (!selected) return 0;
+  const others: [ProviderKey, string[]][] = (Object.keys(HOLDINGS_MAP) as ProviderKey[])
+    .filter((p) => p !== selected)
+    .map((p) => [p, HOLDINGS_MAP[p]]);
+  let count = 0;
+  for (const s of symbols) {
+    const hitOther = others.some(([, list]) => list.includes(s));
+    if (hitOther) count++;
+  }
+  return count;
+}
 
-export default async function ResultPage({
+export default function ResultsPage({
   searchParams,
 }: {
-  searchParams: SearchParams;
+  searchParams: { provider?: string; profile?: InvestorProfile; grade?: string; rows?: string };
 }) {
-  const provider = searchParams.provider ?? "";
-  const profile = searchParams.profile ?? "";
-  const grade = searchParams.grade ?? "—";
+  const providerLabel = searchParams.provider ?? "";
+  const profile = (searchParams.profile as InvestorProfile) ?? "Growth";
+  const rowsParam = searchParams.rows ?? "";
 
-  // Optional: show the holdings the user passed along (for context, not mandatory)
-  let rows: Holding[] = [];
-  try {
-    if (searchParams.rows) {
-      rows = JSON.parse(decodeURIComponent(searchParams.rows));
-      if (!Array.isArray(rows)) rows = [];
-    }
-  } catch {
-    rows = [];
-  }
+  const providerKey =
+    PROVIDERS.find((p) => p.label.toLowerCase() === providerLabel.toLowerCase())
+      ?.key || "";
 
-  // Teaser-only: fetch market regime string (cached ~15min in lib/market)
-  const regime = await getMarketRegime(); // e.g., "Market Cycle: Bull ..."
+  const userRows = parseRows(rowsParam);
+  const total = userRows.reduce((s, r) => s + (Number(r.weight) || 0), 0);
+  const baseGrade = computeGrade(profile, total);
 
-  // Build a link back to edit inputs with prefill
-  const prefill = new URLSearchParams();
-  if (provider) prefill.set("provider", provider);
-  if (profile) prefill.set("profile", profile);
-  if (rows.length) prefill.set("rows", encodeURIComponent(JSON.stringify(rows)));
+  const validity = userRows.map((r) => ({
+    ...r,
+    status: validateSymbol(providerKey as ProviderKey, r.symbol),
+    label: labelFor(r.symbol),
+  }));
+
+  const invalidCount = validity.filter((v) => v.status === "invalid").length;
+  const crossProviderCount = countCrossProviderSymbols(
+    providerKey as ProviderKey,
+    userRows.map((r) => r.symbol)
+  );
+  const offTotalPenalty = Math.min(1, Math.abs(100 - total) / 50);
+  const invalidPenalty = Math.min(1, invalidCount * 0.2);
+  const crossPenalty = Math.min(0.7, crossProviderCount * 0.1);
+
+  const adjusted = Math.max(1, Math.min(5, baseGrade - (offTotalPenalty + invalidPenalty + crossPenalty)));
+  const grade = adjusted.toFixed(1);
+
+  // For “Edit inputs” round-trip
+  const backParams = new URLSearchParams({
+    provider: providerLabel,
+    profile,
+    rows: rowsParam || "",
+  }).toString();
 
   return (
-    <main className="mx-auto max-w-3xl p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Your Grade</h1>
+    <main className="mx-auto max-w-3xl p-6 space-y-8">
+      <h1 className="text-2xl font-bold">Your Grade (v3)</h1>
 
       <div className="rounded-lg border p-6 space-y-3">
-        <p>
-          <span className="font-medium">Provider:</span>{" "}
-          {provider || "—"}
-        </p>
-        <p>
-          <span className="font-medium">Profile:</span>{" "}
-          {profile || "—"}
-        </p>
+        <p><span className="font-medium">Provider:</span> {providerLabel || "—"}</p>
+        <p><span className="font-medium">Profile:</span> {profile}</p>
         <p className="text-3xl">⭐ {grade} / 5</p>
+        <p className="text-sm text-gray-600">
+          Preview grade adjusts for invalid tickers, cross-provider funds, and allocations not summing to 100%.
+        </p>
+      </div>
 
-        <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
-          <div className="font-medium mb-1">Market Cycle (teaser)</div>
-          <div>{regime}</div>
-          <div className="text-xs text-blue-800 mt-1">
-            Full allocation adjustments based on market regime are included in the paid PDF report.
-          </div>
+      <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Ticker validation</h2>
+        <div className="rounded-md border overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-3 py-2 text-left">Symbol</th>
+                <th className="px-3 py-2 text-left">Holding name</th>
+                <th className="px-3 py-2 text-left">Weight %</th>
+                <th className="px-3 py-2 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {validity.map((r, i) => (
+                <tr key={i} className="border-t">
+                  <td className="px-3 py-2 font-mono">{r.symbol}</td>
+                  <td className="px-3 py-2">{r.label || "—"}</td>
+                  <td className="px-3 py-2">{(Number(r.weight) || 0).toFixed(1)}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={`text-[11px] rounded-full px-2 py-1 border ${
+                        r.status === "inList"
+                          ? "bg-green-50 text-green-700 border-green-300"
+                          : r.status === "custom"
+                          ? "bg-amber-50 text-amber-700 border-amber-300"
+                          : "bg-red-50 text-red-700 border-red-300"
+                      }`}
+                    >
+                      {r.status === "inList"
+                        ? "Valid (in list)"
+                        : r.status === "custom"
+                        ? "Custom"
+                        : "Invalid"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {validity.length === 0 && (
+                <tr>
+                  <td className="px-3 py-4 text-gray-500" colSpan={4}>
+                    No holdings entered.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
 
-        <p className="text-sm text-gray-600">
-          This is a preview grade only. Detailed “increase / reduce” suggestions,
-          invalid/mixed ticker penalties, and model comparisons are in the full PDF.
+        <p className="text-xs text-gray-600">
+          Penalties applied — Invalid: {invalidCount}, Cross-provider: {crossProviderCount}, Total deviation:{" "}
+          {Math.abs(100 - total).toFixed(1)}%.
         </p>
-      </div>
+      </section>
 
-      <div className="flex gap-3">
-        <Link
-          href={`/grade/new?${prefill.toString()}`}
-          className="inline-block rounded-lg border px-4 py-2 hover:bg-gray-50"
-        >
-          Edit inputs
-        </Link>
-        <Link
-          href="/pricing"
-          className="inline-block rounded-lg border px-4 py-2 hover:bg-gray-50"
-        >
-          Unlock full PDF
-        </Link>
-      </div>
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Upgrade to see full analysis</h2>
+        <div className="rounded-md border p-4 bg-gray-50">
+          <ul className="list-disc pl-5 space-y-1 text-sm">
+            <li>
+              <strong>Full portfolio analysis</strong> showing which holdings to increase or reduce.
+            </li>
+            <li>
+              <strong>Market-cycle insights</strong> using <code>SPY</code> 30/50/100/200-day SMA trend to adjust risk level.
+            </li>
+            <li>
+              <strong>Professional PDF report</strong> emailed instantly after purchase.
+            </li>
+          </ul>
+          <div className="mt-4 flex gap-3">
+            <Link
+              href="/pricing"
+              className="inline-block rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
+            >
+              Purchase full PDF report
+            </Link>
+            <Link
+              href={`/grade/new?${backParams}`}
+              className="inline-block rounded-lg border px-4 py-2 hover:bg-gray-50"
+            >
+              Edit inputs
+            </Link>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
