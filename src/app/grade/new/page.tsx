@@ -31,7 +31,6 @@ function providerLabel(key: ProviderKey) {
   return PROVIDERS.find((p) => p.key === key)?.label || key;
 }
 
-// --- outer wrapper required by Next.js when using useSearchParams in a Client Component
 export default function NewGradePage() {
   return (
     <Suspense fallback={<main className="mx-auto max-w-3xl p-6">Loading…</main>}>
@@ -44,7 +43,7 @@ function NewGradeInner() {
   const router = useRouter();
   const params = useSearchParams();
 
-  // Seed from query if coming back from results
+  // Seed from results
   const seedProviderLabel = (params.get("provider") || "").toLowerCase();
   const seedProfile = (params.get("profile") as InvestorProfile) || "Growth";
   const seedRows = (() => {
@@ -74,10 +73,8 @@ function NewGradeInner() {
     ]
   );
 
-  // Prefill curated options for the select when provider changes
   const curated = HOLDINGS_MAP[provider] || [];
 
-  // Total as number
   const total = useMemo(() => {
     return rows.reduce((s, r) => s + (r.weight.trim() === "" ? 0 : Number(r.weight) || 0), 0);
   }, [rows]);
@@ -87,18 +84,16 @@ function NewGradeInner() {
   function addRow() {
     setRows((r) => [...r, { symbol: "", weight: "" }]);
   }
-
   function removeRow(i: number) {
     setRows((r) => r.filter((_, idx) => idx !== i));
   }
-
   function updateRow(i: number, key: "symbol" | "weight", v: string) {
     setRows((r) =>
       r.map((row, idx) =>
         idx === i
           ? key === "symbol"
             ? { ...row, symbol: v.toUpperCase() }
-            : { ...row, weight: v } // keep raw string; parse later
+            : { ...row, weight: v }
           : row
       )
     );
@@ -117,7 +112,6 @@ function NewGradeInner() {
     );
   }
 
-  // Validation results for current provider
   const validity = rows.map((r) => ({
     symbol: r.symbol,
     weight: r.weight,
@@ -125,7 +119,6 @@ function NewGradeInner() {
     label: LABELS[r.symbol] || "",
   }));
 
-  // Save and go to results
   function previewGrade() {
     const cleanRows = rows
       .filter((r) => r.symbol.trim() !== "" && r.weight.trim() !== "")
@@ -137,7 +130,7 @@ function NewGradeInner() {
       profile,
       rows: cleanRows,
       grade_base: gradeBase,
-      grade_adjusted: gradeBase, // results page will apply penalties
+      grade_adjusted: gradeBase, // penalties applied on results page
     };
 
     try {
@@ -153,9 +146,8 @@ function NewGradeInner() {
     router.push(`/grade/results?${qp}`);
   }
 
-  // Optional: restore last submission if coming fresh to the page and no seed rows
   useEffect(() => {
-    if (seedRows) return; // already seeded from query
+    if (seedRows) return;
     try {
       const raw = localStorage.getItem(LS_KEY);
       if (!raw) return;
@@ -177,6 +169,26 @@ function NewGradeInner() {
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
+      {/* Stepper */}
+      <div className="flex items-center justify-between text-sm">
+        {[
+          { n: 1, label: "Provider" },
+          { n: 2, label: "Profile" },
+          { n: 3, label: "Holdings" },
+          { n: 4, label: "Preview" },
+        ].map((s, idx) => (
+          <div key={s.n} className="flex-1 flex items-center">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex justify-center items-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs">
+                {s.n}
+              </span>
+              <span className="font-medium">{s.label}</span>
+            </div>
+            {idx < 3 && <div className="flex-1 h-px bg-gray-200 mx-2" />}
+          </div>
+        ))}
+      </div>
+
       <h1 className="text-2xl font-bold">Get your grade</h1>
 
       <section className="space-y-2">
@@ -226,7 +238,12 @@ function NewGradeInner() {
                       updateRow(i, "symbol", v);
                     }}
                   >
-                    <CuratedOptions />
+                    <option value="">— Select from list —</option>
+                    {HOLDINGS_MAP[provider].map((tkr) => (
+                      <option key={tkr} value={tkr}>
+                        {tkr} {LABELS[tkr] ? `— ${LABELS[tkr]}` : ""}
+                      </option>
+                    ))}
                   </select>
                   <input
                     className={`border rounded-md p-2 flex-1 ${status === "invalid" ? "border-red-400" : ""}`}
