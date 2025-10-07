@@ -58,7 +58,7 @@ export default function PricingPage() {
         data = null;
       }
 
-      // No graded inputs? Create a placeholder so they can buy first
+      // If they haven't graded yet, create a placeholder preview
       if (!data) {
         data = {
           provider: "",
@@ -79,59 +79,87 @@ export default function PricingPage() {
   }, []);
 
   return (
-    <main className="mx-auto max-w-3xl p-6 space-y-8">
-      <h1 className="text-3xl font-bold">Get Your Full PDF Report</h1>
-      <p className="text-gray-600">
-        Buy now or grade first — either way works. If you purchase first, we’ll guide you to finish your inputs after checkout.
-      </p>
+    <main className="mx-auto max-w-5xl p-6 md:p-10 space-y-10">
+      <header className="text-center space-y-3">
+        <h1 className="text-3xl md:text-4xl font-bold">Get your full PDF report</h1>
+        <p className="text-gray-600">
+          Clear, model-driven guidance based on your 401(k) provider, investor profile, and the current market trend.
+        </p>
+        <div className="text-sm text-gray-500">
+          Haven’t graded yet? <Link href="/grade/new" className="text-blue-600 underline">Start here</Link>.
+        </div>
+      </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="rounded-lg border p-6">
-          <h2 className="text-xl font-semibold">One-Time Report</h2>
-          <p className="text-sm text-gray-600 mt-1">One detailed PDF, delivered to your email.</p>
-          <div className="mt-5">
-            <button
-              onClick={() => purchase("one_time")}
-              disabled={loading !== null}
-              className={`w-full rounded-lg px-4 py-2 text-white ${
-                loading === "one" ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
-              }`}
-            >
-              {loading === "one" ? "Starting..." : "Buy One-Time"}
-            </button>
+      {/* Plans */}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* One-time */}
+        <div className="rounded-2xl border shadow-sm p-6 md:p-8 flex flex-col">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-xl font-semibold">One-Time Report</h2>
+            <div className="text-3xl font-bold">$79</div>
           </div>
+          <p className="text-gray-600 mt-2">Best for a single deep-dive and quick reallocation.</p>
+          <ul className="mt-5 space-y-2 text-sm">
+            <li>• Personalized allocation vs. model comparison</li>
+            <li>• Invalid/mixed ticker checks and penalties explained</li>
+            <li>• Market-cycle overlay (SPY 30/50/100/200-day SMA)</li>
+            <li>• Actionable “increase / reduce” guidance (in PDF)</li>
+            <li>• Shareable grade badge</li>
+          </ul>
+          <button
+            onClick={() => purchase("one_time")}
+            disabled={loading !== null}
+            className={`mt-6 rounded-lg px-5 py-3 text-white ${
+              loading === "one" ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            {loading === "one" ? "Starting checkout…" : "Buy One-Time"}
+          </button>
         </div>
 
-        <div className="rounded-lg border p-6">
-          <h2 className="text-xl font-semibold">Annual Plan</h2>
-          <p className="text-sm text-gray-600 mt-1">Initial PDF + 3 updates over the next 12 months.</p>
-          <div className="mt-5">
-            <button
-              onClick={() => purchase("annual")}
-              disabled={loading !== null}
-              className={`w-full rounded-lg px-4 py-2 text-white ${
-                loading === "annual" ? "bg-emerald-400" : "bg-emerald-600 hover:bg-emerald-700"
-              }`}
-            >
-              {loading === "annual" ? "Starting..." : "Buy Annual"}
-            </button>
+        {/* Annual */}
+        <div className="rounded-2xl border shadow-sm p-6 md:p-8 flex flex-col relative">
+          <span className="absolute -top-3 right-6 bg-emerald-600 text-white text-xs px-2 py-1 rounded-full">
+            Most Popular
+          </span>
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-xl font-semibold">Annual Plan</h2>
+            <div className="text-3xl font-bold">$149/yr</div>
           </div>
+          <p className="text-gray-600 mt-2">Initial report plus 3 updates across the next 12 months.</p>
+          <ul className="mt-5 space-y-2 text-sm">
+            <li>• Everything in One-Time</li>
+            <li>• 3 scheduled regrades (quarterly)</li>
+            <li>• Email reminders and fresh PDF each update</li>
+            <li>• Priority support</li>
+          </ul>
+          <button
+            onClick={() => purchase("annual")}
+            disabled={loading !== null}
+            className={`mt-6 rounded-lg px-5 py-3 text-white ${
+              loading === "annual" ? "bg-emerald-400" : "bg-emerald-600 hover:bg-emerald-700"
+            }`}
+          >
+            {loading === "annual" ? "Starting checkout…" : "Buy Annual"}
+          </button>
         </div>
-      </div>
-
-      <div className="text-sm text-gray-600">
-        Prefer to grade first?{" "}
-        <Link href="/grade/new" className="text-blue-600 underline">
-          Start here
-        </Link>
-        .
-      </div>
+      </section>
 
       {error && (
         <div className="rounded-md border border-red-300 bg-red-50 text-red-700 p-3 text-sm">
           {error}
         </div>
       )}
+
+      {/* FAQ-ish footer */}
+      <section className="text-sm text-gray-600 space-y-2">
+        <p>
+          Buy first or grade first — either way. If you purchase first, we’ll guide you to finish your inputs on the success page.
+        </p>
+        <p>
+          Your detailed “increase / reduce” guidance and market-cycle insights are included in the paid PDF report.
+        </p>
+      </section>
     </main>
   );
 }
