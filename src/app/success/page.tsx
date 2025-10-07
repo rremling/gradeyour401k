@@ -6,7 +6,7 @@ export default function SuccessPage() {
     <main className="mx-auto max-w-2xl p-6 space-y-6">
       <h1 className="text-2xl font-bold">Thanks! Payment Received.</h1>
       <p className="text-gray-700">
-        If you already graded your inputs, your full PDF report will be emailed shortly.
+        If you already graded your inputs, your full PDF report will arrive by email shortly.
       </p>
       <div className="rounded-lg border p-4 bg-gray-50 space-y-2">
         <p className="font-medium">Did you buy first without grading?</p>
