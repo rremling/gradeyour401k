@@ -1,7 +1,7 @@
 // src/app/grade/new/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   PROVIDERS,
@@ -31,12 +31,21 @@ function providerLabel(key: ProviderKey) {
   return PROVIDERS.find((p) => p.key === key)?.label || key;
 }
 
+// --- outer wrapper required by Next.js when using useSearchParams in a Client Component
 export default function NewGradePage() {
+  return (
+    <Suspense fallback={<main className="mx-auto max-w-3xl p-6">Loading…</main>}>
+      <NewGradeInner />
+    </Suspense>
+  );
+}
+
+function NewGradeInner() {
   const router = useRouter();
   const params = useSearchParams();
 
   // Seed from query if coming back from results
-  const seedProvider = (params.get("provider") || "").toLowerCase();
+  const seedProviderLabel = (params.get("provider") || "").toLowerCase();
   const seedProfile = (params.get("profile") as InvestorProfile) || "Growth";
   const seedRows = (() => {
     const raw = params.get("rows");
@@ -53,9 +62,10 @@ export default function NewGradePage() {
     return null;
   })();
 
-  const [provider, setProvider] = useState<ProviderKey>(
-    (ORDERED_PROVIDERS.find((k) => providerLabel(k).toLowerCase() === seedProvider) as ProviderKey) || "fidelity"
-  );
+  const [provider, setProvider] = useState<ProviderKey>(() => {
+    const found = PROVIDERS.find((p) => p.label.toLowerCase() === seedProviderLabel)?.key as ProviderKey | undefined;
+    return found ?? "fidelity";
+  });
   const [profile, setProfile] = useState<InvestorProfile>(seedProfile);
   const [rows, setRows] = useState<Row[]>(
     seedRows ?? [
@@ -94,7 +104,6 @@ export default function NewGradePage() {
     );
   }
 
-  // Simple helper to render a curated <option> list
   function CuratedOptions() {
     return (
       <>
@@ -118,7 +127,6 @@ export default function NewGradePage() {
 
   // Save and go to results
   function previewGrade() {
-    // Build a compact array for results
     const cleanRows = rows
       .filter((r) => r.symbol.trim() !== "" && r.weight.trim() !== "")
       .map((r) => ({ symbol: r.symbol.toUpperCase(), weight: Number(r.weight) || 0 }));
@@ -129,11 +137,9 @@ export default function NewGradePage() {
       profile,
       rows: cleanRows,
       grade_base: gradeBase,
-      // let results page recompute penalties; store base as adjusted by default
-      grade_adjusted: gradeBase,
+      grade_adjusted: gradeBase, // results page will apply penalties
     };
 
-    // Save last submission so pricing page can use it if they buy later
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(payloadForLocalStorage));
     } catch {}
@@ -213,10 +219,10 @@ export default function NewGradePage() {
                 <div className="flex gap-2">
                   <select
                     className="border rounded-md p-2 flex-1"
-                    value={curated.includes(row.symbol) ? row.symbol : ""}
+                    value={HOLDINGS_MAP[provider].includes(row.symbol) ? row.symbol : ""}
                     onChange={(e) => {
                       const v = e.target.value;
-                      if (v === "") return; // ignore placeholder
+                      if (v === "") return;
                       updateRow(i, "symbol", v);
                     }}
                   >
@@ -239,7 +245,6 @@ export default function NewGradePage() {
                 placeholder="Weight %"
                 value={row.weight}
                 onChange={(e) => {
-                  // allow empty, digits, dot; strip anything else
                   const v = e.target.value.replace(/[^\d.]/g, "");
                   updateRow(i, "weight", v);
                 }}
