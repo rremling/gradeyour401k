@@ -18,7 +18,7 @@ type PreviewPayload = {
 const LS_KEY = "gy4k:lastSubmission";
 
 // Optional: display prices via public envs, or hardcode
-const DISPLAY_ONE_TIME = process.env.NEXT_PUBLIC_PRICE_ONE_TIME || "$49";
+const DISPLAY_ONE_TIME = process.env.NEXT_PUBLIC_PRICE_ONE_TIME || "$79";
 const DISPLAY_ANNUAL   = process.env.NEXT_PUBLIC_PRICE_ANNUAL   || "$149/yr";
 
 async function savePreview(data: PreviewPayload): Promise<string> {
