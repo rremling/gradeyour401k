@@ -45,20 +45,15 @@ export async function POST(req: NextRequest) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   const key = process.env.STRIPE_SECRET_KEY;
 
-  if (!secret || !key) {
-    console.error("Webhook missing STRIPE_WEBHOOK_SECRET or STRIPE_SECRET_KEY");
-    return new NextResponse("Config error", { status: 500 });
-  }
+  if (!secret || !key) return new NextResponse("Config error", { status: 500 });
 
   let event: Stripe.Event;
-
   try {
     const raw = await req.text();
     const sig = req.headers.get("stripe-signature") as string;
     const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
     event = stripe.webhooks.constructEvent(raw, sig, secret);
   } catch (err: any) {
-    console.error("Webhook signature verification failed:", err?.message || err);
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
@@ -73,20 +68,29 @@ export async function POST(req: NextRequest) {
       const previewId = (session.metadata?.previewId as string) || "";
       const planKey = (session.metadata?.planKey as "one_time" | "annual") || "one_time";
 
-      // 1) Persist order (best-effort)
+      // 1) Insert (or upsert) order
       try {
         const id = uuid4();
+        const previewUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(previewId)
+          ? previewId
+          : null;
+
         await query(
           `insert into orders
-           (id, created_at, stripe_session_id, plan_key, email, customer_email, preview_id, amount_cents, currency)
-           values ($1, now(), $2, $3, $4, $4, nullif($5,'')::uuid, $6, $7)
-           on conflict (stripe_session_id) do nothing`,
+             (id, created_at, stripe_session_id, plan_key, email, customer_email, preview_id, amount_cents, currency)
+           values
+             ($1, now(), $2, $3, $4, $4, $5, $6, $7)
+           on conflict (stripe_session_id) do update set
+             customer_email = excluded.customer_email,
+             plan_key = excluded.plan_key,
+             amount_cents = excluded.amount_cents,
+             currency = excluded.currency`,
           [
             id,
             session.id,
             planKey,
             email || null,
-            previewId || null,
+            previewUUID,                          // safe nullable uuid
             session.amount_total || null,
             session.currency || null,
           ]
@@ -95,20 +99,12 @@ export async function POST(req: NextRequest) {
         console.warn("orders insert failed (continuing):", (e as Error).message);
       }
 
-      // 2) Build data (from preview if available)
+      // 2) Build data
       let data: PreviewData | null = null;
       if (previewId) data = await maybeLoadPreview(previewId);
-      if (!data) {
-        data = {
-          provider: "",
-          profile: "Growth",
-          rows: [],
-          grade_base: 0,
-          grade_adjusted: 0,
-        };
-      }
+      if (!data) data = { provider: "", profile: "Growth", rows: [], grade_base: 0, grade_adjusted: 0 };
 
-      // 3) Market regime + build PDF
+      // 3) Market regime + PDF
       const regime = await getMarketRegime();
       const pdf = await buildReportPDF({ ...data, market_regime: regime });
 
@@ -116,10 +112,9 @@ export async function POST(req: NextRequest) {
       if (email) {
         await sendReportEmail({
           to: email,
-          subject:
-            planKey === "annual"
-              ? "Your GradeYour401k Annual Plan — First Report"
-              : "Your GradeYour401k One-Time Report",
+          subject: planKey === "annual"
+            ? "Your GradeYour401k Annual Plan — First Report"
+            : "Your GradeYour401k One-Time Report",
           html:
             `<p>Thanks for your purchase!</p>` +
             (data.rows.length
@@ -131,21 +126,13 @@ export async function POST(req: NextRequest) {
 
         // 5) Mark delivered
         try {
-          await query(
-            `update orders
-             set delivered_at = now()
-             where stripe_session_id = $1`,
-            [session.id]
-          ).catch(() => {});
+          await query(`update orders set delivered_at = now() where stripe_session_id = $1`, [session.id]).catch(() => {});
         } catch {}
-      } else {
-        console.warn("checkout.session.completed: missing email");
       }
     }
 
     return NextResponse.json({ received: true });
   } catch (err: any) {
-    console.error("webhook handler error:", err?.message || err);
     return new NextResponse("Server error", { status: 500 });
   }
 }
