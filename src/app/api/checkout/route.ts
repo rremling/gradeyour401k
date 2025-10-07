@@ -5,10 +5,12 @@ import Stripe from "stripe";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** Helper to read envs safely */
 function env(name: string) {
   return process.env[name] || "";
 }
 
+/** Build a safe base URL for redirect links */
 function safeBaseUrl() {
   return (
     env("NEXT_PUBLIC_BASE_URL") ||
@@ -27,10 +29,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing STRIPE_SECRET_KEY" }, { status: 500 });
     }
 
-    const priceOne  = env("STRIPE_PRICE_ID_ONE_TIME");
-    const priceAnnual = env("STRIPE_PRICE_ID_ANNUAL");
+    const priceOne = env("STRIPE_PRICE_ID_ONE_TIME");   // one-time price id (payment)
+    const priceAnnual = env("STRIPE_PRICE_ID_ANNUAL");  // recurring price id (subscription)
 
-    const priceId = planKey === "annual" ? (priceAnnual || "") : (priceOne || "");
+    const isSubscription = planKey === "annual";
+    const priceId = isSubscription ? priceAnnual : priceOne;
+
     if (!priceId) {
       return NextResponse.json(
         { error: "Missing Stripe priceId: set STRIPE_PRICE_ID_ONE_TIME / STRIPE_PRICE_ID_ANNUAL" },
@@ -40,19 +44,21 @@ export async function POST(req: NextRequest) {
 
     const stripe = new Stripe(secret, { apiVersion: "2024-06-20" });
     const origin = safeBaseUrl();
-    const isSubscription = planKey === "annual";
 
+    // Base params
     const params: Stripe.Checkout.SessionCreateParams = {
       mode: isSubscription ? "subscription" : "payment",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/success`,
+      // Include session_id in success URL so /success can fetch details
+      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
       metadata: { planKey, previewId },
+      allow_promotion_codes: true, // let users enter your promo code
     };
 
-    // ⚠️ Only set customer_creation for one-time (payment) mode
+    // Stripe only allows customer_creation in payment mode
     if (!isSubscription) {
-      // @ts-expect-error - Stripe types allow this in payment mode
+      // @ts-expect-error - field is valid for payment mode
       params.customer_creation = "always";
     }
 
