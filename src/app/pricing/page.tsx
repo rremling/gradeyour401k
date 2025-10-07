@@ -17,13 +17,20 @@ type PreviewPayload = {
 
 const LS_KEY = "gy4k:lastSubmission";
 
+// Optional: display prices via public envs, or hardcode
+const DISPLAY_ONE_TIME = process.env.NEXT_PUBLIC_PRICE_ONE_TIME || "$49";
+const DISPLAY_ANNUAL   = process.env.NEXT_PUBLIC_PRICE_ANNUAL   || "$149/yr";
+
 async function savePreview(data: PreviewPayload): Promise<string> {
   const res = await fetch("/api/preview/save", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error("Failed to save preview");
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Save preview failed (${res.status}): ${body}`);
+  }
   const json = await res.json();
   return json.previewId as string;
 }
@@ -34,19 +41,27 @@ async function startCheckout(planKey: "one_time" | "annual", previewId: string) 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ planKey, previewId }),
   });
-  if (!res.ok) throw new Error("Failed to start checkout");
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Checkout failed (${res.status}): ${body}`);
+  }
   const json = await res.json();
   if (!json.url) throw new Error("No checkout URL returned");
   window.location.href = json.url as string;
 }
 
 export default function PricingPage() {
+  const [agree, setAgree] = useState(false);
   const [loading, setLoading] = useState<"one" | "annual" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const purchase = useCallback(async (planKey: "one_time" | "annual") => {
     try {
       setError(null);
+      if (!agree) {
+        setError("Please agree to the RIA Agreement before continuing.");
+        return;
+      }
       setLoading(planKey);
 
       // Try to use the latest graded inputs from localStorage
@@ -76,7 +91,7 @@ export default function PricingPage() {
       setError(e?.message || "Something went wrong starting checkout.");
       setLoading(null);
     }
-  }, []);
+  }, [agree]);
 
   return (
     <main className="mx-auto max-w-5xl p-6 md:p-10 space-y-10">
@@ -96,7 +111,7 @@ export default function PricingPage() {
         <div className="rounded-2xl border shadow-sm p-6 md:p-8 flex flex-col">
           <div className="flex items-baseline justify-between">
             <h2 className="text-xl font-semibold">One-Time Report</h2>
-            <div className="text-3xl font-bold">$79</div>
+            <div className="text-3xl font-bold">{DISPLAY_ONE_TIME}</div>
           </div>
           <p className="text-gray-600 mt-2">Best for a single deep-dive and quick reallocation.</p>
           <ul className="mt-5 space-y-2 text-sm">
@@ -124,9 +139,9 @@ export default function PricingPage() {
           </span>
           <div className="flex items-baseline justify-between">
             <h2 className="text-xl font-semibold">Annual Plan</h2>
-            <div className="text-3xl font-bold">$149/yr</div>
+            <div className="text-3xl font-bold">{DISPLAY_ANNUAL}</div>
           </div>
-          <p className="text-gray-600 mt-2">Initial report plus 3 updates across the next 12 months.</p>
+          <p className="text-gray-600 mt-2">Initial report + 3 updates over the next 12 months.</p>
           <ul className="mt-5 space-y-2 text-sm">
             <li>• Everything in One-Time</li>
             <li>• 3 scheduled regrades (quarterly)</li>
@@ -145,19 +160,38 @@ export default function PricingPage() {
         </div>
       </section>
 
-      {error && (
-        <div className="rounded-md border border-red-300 bg-red-50 text-red-700 p-3 text-sm">
-          {error}
-        </div>
-      )}
+      {/* Agreement + Errors */}
+      <section className="space-y-3">
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={agree}
+            onChange={(e) => setAgree(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            I agree to the{" "}
+            <Link href="/legal/ria" className="text-blue-600 underline" target="_blank">
+              RIA Agreement
+            </Link>
+            .
+          </span>
+        </label>
 
-      {/* FAQ-ish footer */}
+        {error && (
+          <div className="rounded-md border border-red-300 bg-red-50 text-red-700 p-3 text-sm">
+            {error}
+          </div>
+        )}
+      </section>
+
+      {/* Footer */}
       <section className="text-sm text-gray-600 space-y-2">
         <p>
-          Buy first or grade first — either way. If you purchase first, we’ll guide you to finish your inputs on the success page.
+          You can buy first or grade first. If you purchase first, we’ll guide you to finish your inputs on the success page.
         </p>
         <p>
-          Your detailed “increase / reduce” guidance and market-cycle insights are included in the paid PDF report.
+          Detailed “increase / reduce” guidance and market-cycle insights are included in the paid PDF report.
         </p>
       </section>
     </main>
