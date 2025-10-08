@@ -1,29 +1,28 @@
 // src/lib/email.ts
 import { Resend } from "resend";
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-export async function sendReportEmail(opts: {
+export async function sendReportEmail({
+  to,
+  subject,
+  html,
+  attachment,
+}: {
   to: string;
   subject: string;
   html: string;
-  attachment: { filename: string; content: Buffer; contentType?: string };
+  attachment: { filename: string; content: Buffer };
 }) {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn("RESEND_API_KEY missing — skipping email send");
-    return { skipped: true };
-  }
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  const res = await resend.emails.send({
-    from: "reports@gradeyour401k.com",
-    to: [opts.to],
-    subject: opts.subject,
-    html: opts.html,
+  return await resend.emails.send({
+    from: "reports@gradeyour401k.kenaiinvest.com", // 👈 must match verified sender
+    to,
+    subject,
+    html,
     attachments: [
       {
-        filename: opts.attachment.filename,
-        content: opts.attachment.content,
-        contentType: opts.attachment.contentType || "application/pdf",
+        filename: attachment.filename,
+        content: attachment.content.toString("base64"),
       },
     ],
   });
-  return res;
 }
