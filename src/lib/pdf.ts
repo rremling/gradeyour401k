@@ -1,7 +1,5 @@
-// src/lib/pdf.ts
-import PDFDocument from "pdfkit";
-import fs from "fs";
-import path from "path";
+// src/lib/pdf.ts (pdf-lib version: no external fonts needed)
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 type Holding = { symbol: string; weight: number };
 export type PreviewData = {
@@ -13,92 +11,104 @@ export type PreviewData = {
   market_regime?: string;
 };
 
-function loadFont(relPath: string): Buffer | null {
-  try {
-    const p = path.join(process.cwd(), relPath);
-    return fs.readFileSync(p);
-  } catch {
-    return null;
-  }
+function drawTextBlock(page: any, text: string, x: number, y: number, opts: { size?: number; color?: any; font?: any } = {}) {
+  page.drawText(text, {
+    x,
+    y,
+    size: opts.size ?? 10,
+    color: opts.color ?? rgb(0.1, 0.1, 0.1),
+    font: opts.font,
+  });
 }
 
 export async function buildReportPDF(data: PreviewData): Promise<Buffer> {
-  const doc = new PDFDocument({ size: "LETTER", margin: 48 });
-  const chunks: Buffer[] = [];
-  doc.on("data", (c) => chunks.push(c));
-  const done = new Promise<Buffer>((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]); // Letter size
+  const { width, height } = page.getSize();
 
-  // Load fonts from /public (serverless-readable)
-  const interRegular = loadFont("public/fonts/Inter-Regular.ttf");
-  const interBold = loadFont("public/fonts/Inter-Bold.ttf");
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  if (interRegular) doc.registerFont("Inter", interRegular);
-  if (interBold) doc.registerFont("Inter-Bold", interBold);
-
-  const H = interBold ? "Inter-Bold" : undefined;
-  const T = interRegular ? "Inter" : undefined;
-
+  let y = height - 64;
   // Header
-  doc.font(H || "Helvetica-Bold").fontSize(18).fillColor("#111").text("GradeYour401k — Personalized 401(k) Report");
-  doc.moveDown(0.2);
-  doc.strokeColor("#e5e7eb").lineWidth(1).moveTo(doc.page.margins.left, doc.y).lineTo(612 - doc.page.margins.right, doc.y).stroke();
-  doc.moveDown(0.6);
+  drawTextBlock(page, "GradeYour401k — Personalized 401(k) Report", 48, y, { size: 18, font: fontBold });
+  y -= 18 + 8;
 
-  // Snapshot
-  doc.font(H || "Helvetica-Bold").fontSize(12).fillColor("#111").text("Account Snapshot", { underline: true });
-  doc.moveDown(0.2);
-  doc.font(T || "Helvetica").fontSize(10).fillColor("#333")
-    .text(`Provider: ${data.provider || "—"}`)
-    .text(`Investor Profile: ${data.profile || "—"}`)
-    .text(`Generated: ${new Date().toLocaleString()}`);
-  doc.moveDown(0.4);
+  // Divider
+  page.drawLine({ start: { x: 48, y }, end: { x: width - 48, y }, color: rgb(0.9, 0.9, 0.9) });
+  y -= 20;
+
+  // Account Snapshot
+  drawTextBlock(page, "Account Snapshot", 48, y, { size: 12, font: fontBold });
+  y -= 16;
+  drawTextBlock(page, `Provider: ${data.provider || "—"}`, 48, y, { font });
+  y -= 14;
+  drawTextBlock(page, `Investor Profile: ${data.profile || "—"}`, 48, y, { font });
+  y -= 14;
+  drawTextBlock(page, `Generated: ${new Date().toLocaleString()}`, 48, y, { font });
+  y -= 22;
 
   // Grade
-  doc.font(H || "Helvetica-Bold").fontSize(12).fillColor("#111").text("Your Grade", { underline: true });
-  doc.moveDown(0.2);
-  doc.font(H || "Helvetica-Bold").fontSize(16).fillColor("#111")
-    .text(`${(data.grade_adjusted ?? data.grade_base).toFixed?.(1) || data.grade_adjusted || data.grade_base}/5`);
-  doc.font(T || "Helvetica").fontSize(10).fillColor("#6b7280")
-    .text(`Base model grade: ${data.grade_base?.toFixed?.(1) ?? data.grade_base}/5`);
-  doc.moveDown(0.4);
+  drawTextBlock(page, "Your Grade", 48, y, { size: 12, font: fontBold });
+  y -= 18;
+  const gradeText = `${((data.grade_adjusted ?? data.grade_base) as number).toFixed?.(1) || data.grade_adjusted || data.grade_base}/5`;
+  drawTextBlock(page, gradeText, 48, y, { size: 16, font: fontBold });
+  y -= 16 + 6;
+  drawTextBlock(page, `Base model grade: ${data.grade_base?.toFixed?.(1) ?? data.grade_base}/5`, 48, y, { font, size: 10, color: rgb(0.42, 0.45, 0.5) });
+  y -= 22;
 
+  // Market regime (optional)
   if (data.market_regime) {
-    doc.font(H || "Helvetica-Bold").fontSize(12).fillColor("#111").text("Market Cycle Overlay", { underline: true });
-    doc.moveDown(0.2);
-    doc.font(T || "Helvetica").fontSize(10).fillColor("#111").text(data.market_regime);
-    doc.moveDown(0.4);
+    drawTextBlock(page, "Market Cycle Overlay", 48, y, { size: 12, font: fontBold });
+    y -= 16;
+    drawTextBlock(page, data.market_regime, 48, y, { font });
+    y -= 22;
   }
 
   // Holdings
-  doc.font(H || "Helvetica-Bold").fontSize(12).fillColor("#111").text("Current Holdings", { underline: true });
-  doc.moveDown(0.2);
-  const startX = doc.x; const col2 = startX + 320;
-  doc.font(T || "Helvetica").fontSize(10).fillColor("#111");
-  doc.text("Symbol", startX, doc.y);
-  doc.text("Weight %", col2, doc.y);
-  doc.moveDown(0.2);
-  doc.strokeColor("#d1d5db").moveTo(startX, doc.y).lineTo(startX + 500, doc.y).stroke();
+  drawTextBlock(page, "Current Holdings", 48, y, { size: 12, font: fontBold });
+  y -= 16;
+
+  // Table headers
+  drawTextBlock(page, "Symbol", 48, y, { fontBold });
+  drawTextBlock(page, "Weight %", 360, y, { fontBold });
+  y -= 12;
+  page.drawLine({ start: { x: 48, y }, end: { x: width - 48, y }, color: rgb(0.82, 0.85, 0.86) });
+  y -= 10;
 
   (data.rows || []).forEach((r) => {
-    doc.moveDown(0.12);
-    doc.fillColor("#111").text(r.symbol, startX, doc.y);
-    doc.text(String(r.weight), col2, doc.y);
+    drawTextBlock(page, String(r.symbol || "—"), 48, y, { font });
+    drawTextBlock(page, String(r.weight ?? "—"), 360, y, { font });
+    y -= 14;
+    if (y < 80) {
+      // new page if needed
+      y = height - 64;
+      const p2 = pdfDoc.addPage([612, 792]);
+      p2.drawText("Current Holdings (cont.)", { x: 48, y, size: 12, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+      y -= 24;
+    }
   });
 
-  // Guidance blurb
-  doc.moveDown(0.8);
-  doc.font(H || "Helvetica-Bold").fontSize(12).fillColor("#111").text("Model Comparison & Guidance", { underline: true });
-  doc.moveDown(0.2);
-  doc.font(T || "Helvetica").fontSize(10).fillColor("#374151").text(
-    "Full section includes suggested increases/reductions by ticker, penalties for invalid or mixed tickers, and market-cycle overlays aligned to the model."
+  y -= 18;
+  drawTextBlock(page, "Model Comparison & Guidance", 48, Math.max(y, 80), { size: 12, font: fontBold });
+  y -= 16;
+  drawTextBlock(
+    page,
+    "Full section includes suggested increases/reductions by ticker, penalties for invalid/mixed tickers, and market-cycle overlays aligned to the model.",
+    48,
+    Math.max(y, 64),
+    { font, size: 10, color: rgb(0.22, 0.25, 0.28) }
   );
 
-  // Disclaimer
-  doc.moveDown(0.8);
-  doc.font(T || "Helvetica").fontSize(9).fillColor("#6b7280").text(
-    "Disclaimer: Educational and model-based. Not individualized investment advice. Review plan rules, prospectuses, and fees before changes."
+  // Footer disclaimer
+  drawTextBlock(
+    page,
+    "Disclaimer: Educational and model-based. Not individualized investment advice. Review plan rules, prospectuses, and fees before changes.",
+    48,
+    48,
+    { font, size: 9, color: rgb(0.42, 0.45, 0.5) }
   );
 
-  doc.end();
-  return done;
+  const bytes = await pdfDoc.save();
+  return Buffer.from(bytes);
 }
