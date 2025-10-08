@@ -39,7 +39,7 @@ async function startCheckout(planKey: "one_time" | "annual", previewId: string) 
   const res = await fetch("/api/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ planKey, previewId }),
+    body: JSON.stringify({ planKey: "annual", previewId }),
   });
   if (!res.ok) {
     const body = await res.text();
