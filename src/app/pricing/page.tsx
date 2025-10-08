@@ -18,25 +18,25 @@ function formatUSD(amount: number) {
   return `$${amount.toFixed(0)}`;
 }
 
-function applyDiscount(base: number, promo: AppliedPromo | null) {
-  if (!promo) return base;
+function applyDiscountUSD(baseDollars: number, promo: AppliedPromo | null) {
+  if (!promo) return baseDollars;
+  // amount_off only valid if coupon currency is USD
+  if (promo.amount_off != null && promo.currency?.toLowerCase() === "usd") {
+    const discounted = baseDollars - promo.amount_off / 100;
+    return Math.max(0, discounted);
+  }
   if (promo.percent_off != null) {
-    const discounted = base * (1 - promo.percent_off / 100);
+    const discounted = baseDollars * (1 - promo.percent_off / 100);
     return Math.max(0, discounted);
   }
-  if (promo.amount_off != null) {
-    const amountOffDollars = promo.amount_off / 100; // cents -> dollars
-    const discounted = base - amountOffDollars;
-    return Math.max(0, discounted);
-  }
-  return base;
+  return baseDollars;
 }
 
 export default function PricingPage() {
   const [isLoading, setIsLoading] = useState<"one_time" | "annual" | null>(null);
   const [riaAccepted, setRiaAccepted] = useState(false);
 
-  // Promo state (bottom box)
+  // Promo state
   const [promo, setPromo] = useState("");
   const [promoStatus, setPromoStatus] = useState<"idle" | "checking" | "applied" | "invalid">("idle");
   const [applied, setApplied] = useState<AppliedPromo | null>(null);
@@ -61,14 +61,13 @@ export default function PricingPage() {
       });
       const data = await res.json();
       if (data?.valid && data?.promotionCodeId) {
-        const coupon = data.coupon || {};
-        const ap: AppliedPromo = {
+        const c = data.coupon || {};
+        setApplied({
           id: data.promotionCodeId as string,
-          percent_off: coupon.percent_off ?? null,
-          amount_off: coupon.amount_off ?? null,
-          currency: coupon.currency ?? "usd",
-        };
-        setApplied(ap);
+          percent_off: c.percent_off ?? null,
+          amount_off: c.amount_off ?? null,
+          currency: (c.currency || "usd").toLowerCase(),
+        });
         setPromoStatus("applied");
       } else {
         setApplied(null);
@@ -94,13 +93,14 @@ export default function PricingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planKey,
-          promotionCodeId: applied?.id || undefined, // send only if applied
+          promotionCodeId: applied?.id || undefined,
         }),
       });
       const data = await res.json();
       if (data?.url) {
         window.location.href = data.url as string;
       } else {
+        // surface server error from /api/checkout
         setError(data?.error || "Checkout failed. Please try again.");
       }
     } catch (err) {
@@ -111,19 +111,10 @@ export default function PricingPage() {
     }
   }
 
-  const buyDisabled = useMemo(
-    () => !riaAccepted || isLoading !== null,
-    [riaAccepted, isLoading]
-  );
+  const buyDisabled = useMemo(() => !riaAccepted || isLoading !== null, [riaAccepted, isLoading]);
 
-  const estOneTime = useMemo(
-    () => applyDiscount(PRICE_ONE_TIME, applied),
-    [applied]
-  );
-  const estAnnual = useMemo(
-    () => applyDiscount(PRICE_ANNUAL, applied),
-    [applied]
-  );
+  const estOneTime = useMemo(() => applyDiscountUSD(PRICE_ONE_TIME, applied), [applied]);
+  const estAnnual = useMemo(() => applyDiscountUSD(PRICE_ANNUAL, applied), [applied]);
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 space-y-8">
@@ -134,7 +125,6 @@ export default function PricingPage() {
           provider-specific fund analysis and market-cycle context. Not sure yet?
         </p>
 
-        {/* Link to get a grade first */}
         <Link
           href="/grade/new"
           className="inline-flex items-center rounded-lg border px-4 py-2 text-sm hover:bg-gray-50"
@@ -203,7 +193,7 @@ export default function PricingPage() {
         </div>
       </div>
 
-      {/* RIA Agreement acknowledgment */}
+      {/* RIA Agreement */}
       <div ref={riaRef} className="mt-2 rounded-lg border border-gray-200 p-4 bg-white">
         <label className="flex items-start gap-3 text-sm">
           <input
