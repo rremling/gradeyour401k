@@ -4,24 +4,52 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
+type AppliedPromo = {
+  id: string;
+  percent_off: number | null;
+  amount_off: number | null; // cents
+  currency: string;          // e.g., 'usd'
+};
+
+const PRICE_ONE_TIME = 79;   // USD
+const PRICE_ANNUAL = 199;    // USD
+
+function formatUSD(amount: number) {
+  return `$${amount.toFixed(0)}`;
+}
+
+function applyDiscount(base: number, promo: AppliedPromo | null) {
+  if (!promo) return base;
+  if (promo.percent_off != null) {
+    const discounted = base * (1 - promo.percent_off / 100);
+    return Math.max(0, discounted);
+  }
+  if (promo.amount_off != null) {
+    const amountOffDollars = promo.amount_off / 100; // cents -> dollars
+    const discounted = base - amountOffDollars;
+    return Math.max(0, discounted);
+  }
+  return base;
+}
+
 export default function PricingPage() {
   const [isLoading, setIsLoading] = useState<"one_time" | "annual" | null>(null);
   const [riaAccepted, setRiaAccepted] = useState(false);
 
-  // Promo state
+  // Promo state (bottom box)
   const [promo, setPromo] = useState("");
-  const [appliedPromoId, setAppliedPromoId] = useState<string | null>(null);
   const [promoStatus, setPromoStatus] = useState<"idle" | "checking" | "applied" | "invalid">("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [applied, setApplied] = useState<AppliedPromo | null>(null);
 
+  const [error, setError] = useState<string | null>(null);
   const riaRef = useRef<HTMLDivElement | null>(null);
 
   async function handleApplyPromo() {
     setError(null);
     const code = promo.trim().toUpperCase();
     if (!code) {
+      setApplied(null);
       setPromoStatus("invalid");
-      setAppliedPromoId(null);
       return;
     }
     try {
@@ -33,15 +61,22 @@ export default function PricingPage() {
       });
       const data = await res.json();
       if (data?.valid && data?.promotionCodeId) {
-        setAppliedPromoId(data.promotionCodeId);
+        const coupon = data.coupon || {};
+        const ap: AppliedPromo = {
+          id: data.promotionCodeId as string,
+          percent_off: coupon.percent_off ?? null,
+          amount_off: coupon.amount_off ?? null,
+          currency: coupon.currency ?? "usd",
+        };
+        setApplied(ap);
         setPromoStatus("applied");
       } else {
-        setAppliedPromoId(null);
+        setApplied(null);
         setPromoStatus("invalid");
       }
     } catch (e) {
       console.error(e);
-      setAppliedPromoId(null);
+      setApplied(null);
       setPromoStatus("invalid");
     }
   }
@@ -59,7 +94,7 @@ export default function PricingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planKey,
-          promotionCodeId: appliedPromoId || undefined, // only send id if applied
+          promotionCodeId: applied?.id || undefined, // send only if applied
         }),
       });
       const data = await res.json();
@@ -79,6 +114,15 @@ export default function PricingPage() {
   const buyDisabled = useMemo(
     () => !riaAccepted || isLoading !== null,
     [riaAccepted, isLoading]
+  );
+
+  const estOneTime = useMemo(
+    () => applyDiscount(PRICE_ONE_TIME, applied),
+    [applied]
+  );
+  const estAnnual = useMemo(
+    () => applyDiscount(PRICE_ANNUAL, applied),
+    [applied]
   );
 
   return (
@@ -112,8 +156,13 @@ export default function PricingPage() {
         <div className="rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-all bg-white">
           <h2 className="text-2xl font-semibold mb-2">One-Time Report</h2>
           <p className="text-gray-500 mb-4">Perfect for a single, in-depth grade.</p>
-          <div className="text-4xl font-bold mb-4">$79</div>
-          <ul className="text-sm text-gray-600 space-y-2 mb-6">
+          <div className="text-4xl font-bold mb-1">{formatUSD(PRICE_ONE_TIME)}</div>
+          {applied && (
+            <div className="text-sm text-green-700">
+              After promo: <span className="font-semibold">{formatUSD(estOneTime)}</span>
+            </div>
+          )}
+          <ul className="text-sm text-gray-600 space-y-2 mb-6 mt-3">
             <li>✅ Instant grade & detailed PDF</li>
             <li>✅ Provider-specific fund analysis</li>
             <li>✅ Market-cycle overlay insights</li>
@@ -132,8 +181,13 @@ export default function PricingPage() {
         <div className="rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-all bg-white">
           <h2 className="text-2xl font-semibold mb-2">Annual Plan</h2>
           <p className="text-gray-500 mb-4">For proactive investors who want updates.</p>
-          <div className="text-4xl font-bold mb-4">$199/yr</div>
-          <ul className="text-sm text-gray-600 space-y-2 mb-6">
+          <div className="text-4xl font-bold mb-1">{formatUSD(PRICE_ANNUAL)}/yr</div>
+          {applied && (
+            <div className="text-sm text-green-700">
+              After promo: <span className="font-semibold">{formatUSD(estAnnual)}</span>/yr
+            </div>
+          )}
+          <ul className="text-sm text-gray-600 space-y-2 mb-6 mt-3">
             <li>✅ Everything in the One-Time plan</li>
             <li>✅ Three additional quarterly updates</li>
             <li>✅ Market regime monitoring</li>
@@ -195,7 +249,7 @@ export default function PricingPage() {
         </div>
         {promoStatus === "applied" && (
           <p className="mt-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 inline-block">
-            Promo applied.
+            Promo applied. Prices above show your estimate.
           </p>
         )}
         {promoStatus === "invalid" && (
