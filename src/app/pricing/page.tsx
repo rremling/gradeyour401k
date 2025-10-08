@@ -7,9 +7,44 @@ import Link from "next/link";
 export default function PricingPage() {
   const [isLoading, setIsLoading] = useState<"one_time" | "annual" | null>(null);
   const [riaAccepted, setRiaAccepted] = useState(false);
+
+  // Promo state
   const [promo, setPromo] = useState("");
+  const [appliedPromoId, setAppliedPromoId] = useState<string | null>(null);
+  const [promoStatus, setPromoStatus] = useState<"idle" | "checking" | "applied" | "invalid">("idle");
   const [error, setError] = useState<string | null>(null);
+
   const riaRef = useRef<HTMLDivElement | null>(null);
+
+  async function handleApplyPromo() {
+    setError(null);
+    const code = promo.trim().toUpperCase();
+    if (!code) {
+      setPromoStatus("invalid");
+      setAppliedPromoId(null);
+      return;
+    }
+    try {
+      setPromoStatus("checking");
+      const res = await fetch("/api/checkout/validate-promo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (data?.valid && data?.promotionCodeId) {
+        setAppliedPromoId(data.promotionCodeId);
+        setPromoStatus("applied");
+      } else {
+        setAppliedPromoId(null);
+        setPromoStatus("invalid");
+      }
+    } catch (e) {
+      console.error(e);
+      setAppliedPromoId(null);
+      setPromoStatus("invalid");
+    }
+  }
 
   async function handleBuy(planKey: "one_time" | "annual") {
     setError(null);
@@ -24,7 +59,7 @@ export default function PricingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planKey,
-          promo: promo.trim() || undefined, // optional coupon text
+          promotionCodeId: appliedPromoId || undefined, // only send id if applied
         }),
       });
       const data = await res.json();
@@ -41,7 +76,10 @@ export default function PricingPage() {
     }
   }
 
-  const buyDisabled = useMemo(() => !riaAccepted || isLoading !== null, [riaAccepted, isLoading]);
+  const buyDisabled = useMemo(
+    () => !riaAccepted || isLoading !== null,
+    [riaAccepted, isLoading]
+  );
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 space-y-8">
@@ -61,32 +99,15 @@ export default function PricingPage() {
         </Link>
       </div>
 
-      {/* Optional promo code */}
-      <div className="mx-auto max-w-md w-full">
-        <label className="block text-sm font-medium mb-1">Promo code (optional)</label>
-        <input
-          type="text"
-          inputMode="text"
-          autoCapitalize="characters"
-          placeholder="Enter code"
-          value={promo}
-          onChange={(e) => setPromo(e.target.value)}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <p className="mt-1 text-xs text-gray-500">
-          If valid, your discount will be applied at checkout.
-        </p>
-      </div>
-
       {error && (
         <div className="mx-auto max-w-md w-full">
-          <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          <p className="mt-1 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
             {error}
           </p>
         </div>
       )}
 
-      <div className="grid sm:grid-cols-2 gap-8 mt-4">
+      <div className="grid sm:grid-cols-2 gap-8 mt-2">
         {/* ONE-TIME */}
         <div className="rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-all bg-white">
           <h2 className="text-2xl font-semibold mb-2">One-Time Report</h2>
@@ -148,6 +169,38 @@ export default function PricingPage() {
         {!riaAccepted && (
           <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 inline-block">
             Please check this box to enable checkout.
+          </p>
+        )}
+      </div>
+
+      {/* Promo code (bottom) */}
+      <div className="mx-auto max-w-md w-full rounded-lg border border-gray-200 p-4 bg-white">
+        <label className="block text-sm font-medium mb-1">Promo code (optional)</label>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            inputMode="text"
+            value={promo}
+            onChange={(e) => setPromo(e.target.value.toUpperCase())}
+            placeholder="ENTER CODE"
+            className="uppercase flex-1 rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={handleApplyPromo}
+            className="rounded-lg border px-4 py-2 hover:bg-gray-50"
+          >
+            {promoStatus === "checking" ? "Checking…" : "Apply"}
+          </button>
+        </div>
+        {promoStatus === "applied" && (
+          <p className="mt-2 text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-2 py-1 inline-block">
+            Promo applied.
+          </p>
+        )}
+        {promoStatus === "invalid" && (
+          <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-2 py-1 inline-block">
+            Invalid or inactive code.
           </p>
         )}
       </div>
