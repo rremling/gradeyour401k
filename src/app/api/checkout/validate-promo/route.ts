@@ -12,26 +12,35 @@ export async function POST(req: NextRequest) {
     if (!secret) {
       return NextResponse.json({ ok: false, error: "Missing STRIPE_SECRET_KEY" }, { status: 500 });
     }
-    if (!code || typeof code !== "string") {
-      return NextResponse.json({ ok: false, valid: false }, { status: 400 });
+    const normalized = (code || "").toString().trim().toUpperCase();
+    if (!normalized) {
+      return NextResponse.json({ ok: true, valid: false });
     }
 
     const stripe = new Stripe(secret, { apiVersion: "2024-06-20" });
-    const promos = await stripe.promotionCodes.list({ code, active: true, limit: 1 });
+    const promos = await stripe.promotionCodes.list({ code: normalized, active: true, limit: 1 });
 
     if (!promos.data.length) {
       return NextResponse.json({ ok: true, valid: false });
     }
 
     const pc = promos.data[0];
+    const coup = pc.coupon;
+
     return NextResponse.json({
       ok: true,
       valid: true,
       promotionCodeId: pc.id,
       code: pc.code,
+      coupon: {
+        percent_off: coup.percent_off ?? null,
+        amount_off: coup.amount_off ?? null, // cents
+        currency: coup.currency ?? "usd",
+        duration: coup.duration,            // once | repeating | forever
+      },
     });
   } catch (e: any) {
     console.error("validate-promo error:", e?.message || e);
-    return NextResponse.json({ ok: false, valid: false }, { status: 500 });
+    return NextResponse.json({ ok: false, valid: false, error: e?.message || "validation failed" }, { status: 500 });
   }
 }
