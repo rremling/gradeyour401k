@@ -1,40 +1,15 @@
+// src/app/pricing/page.tsx
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-// ...existing imports/types/utilities...
+
+import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
 
 export default function PricingPage() {
   const [isLoading, setIsLoading] = useState<"one_time" | "annual" | null>(null);
   const [riaAccepted, setRiaAccepted] = useState(false);
-
-  // NEW: preliminary grade gate
-  const [hasPrelim, setHasPrelim] = useState(false);
-  const [prelimAccepted, setPrelimAccepted] = useState(false);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const id = typeof window !== "undefined" ? localStorage.getItem("gy4k_preview_id") : null;
-    if (id) {
-      setPreviewId(id);
-      setHasPrelim(true);
-      setPrelimAccepted(true); // auto-check if found
-    } else {
-      setPreviewId(null);
-      setHasPrelim(false);
-      setPrelimAccepted(false);
-    }
-  }, []);
-
-  // ...promo code state...
+  const riaRef = useRef<HTMLDivElement | null>(null);
 
   async function handleBuy(planKey: "one_time" | "annual") {
-    setError(null);
-
-    if (!prelimAccepted || !hasPrelim || !previewId) {
-      // strong nudge to get a grade first
-      window.location.href = "/grade/new";
-      return;
-    }
-
     if (!riaAccepted) {
       riaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
@@ -44,68 +19,107 @@ export default function PricingPage() {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          planKey,
-          promotionCodeId: applied?.id || undefined,
-          previewId, // 👈 pass through to metadata
-        }),
+        body: JSON.stringify({ planKey }),
       });
       const data = await res.json();
       if (data?.url) {
         window.location.href = data.url as string;
       } else {
-        setError(data?.error || "Checkout failed. Please try again.");
+        alert(`Checkout failed: ${data?.error || "unknown error"}`);
       }
     } catch (err) {
       console.error(err);
-      setError("Failed to start checkout. Please try again.");
+      alert("Failed to start checkout");
     } finally {
       setIsLoading(null);
     }
   }
 
-  const buyDisabled = useMemo(
-    () => !riaAccepted || !prelimAccepted || isLoading !== null,
-    [riaAccepted, prelimAccepted, isLoading]
-  );
+  const buyDisabled = useMemo(() => !riaAccepted || isLoading !== null, [riaAccepted, isLoading]);
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10 space-y-8">
-      {/* ...header... */}
+      <div className="flex flex-col items-center gap-4 text-center">
+        <h1 className="text-3xl font-bold">Choose Your Plan</h1>
+        <p className="text-gray-600 max-w-2xl">
+          Instantly grade your 401(k) allocation and receive a personalized PDF report with
+          provider-specific fund analysis and market-cycle context. Not sure yet?
+        </p>
 
-      {/* Preliminary Grade gate */}
-      <div className="rounded-lg border border-gray-200 p-4 bg-white">
+        {/* Link to get a grade first */}
+        <Link
+          href="/grade/new"
+          className="inline-flex items-center rounded-lg border px-4 py-2 text-sm hover:bg-gray-50"
+        >
+          Get your grade first →
+        </Link>
+      </div>
+
+      <div className="grid sm:grid-cols-2 gap-8 mt-4">
+        {/* ONE-TIME */}
+        <div className="rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-all bg-white">
+          <h2 className="text-2xl font-semibold mb-2">One-Time Report</h2>
+          <p className="text-gray-500 mb-4">Perfect for a single, in-depth grade.</p>
+          <div className="text-4xl font-bold mb-4">$79</div>
+          <ul className="text-sm text-gray-600 space-y-2 mb-6">
+            <li>✅ Instant grade & detailed PDF</li>
+            <li>✅ Provider-specific fund analysis</li>
+            <li>✅ Market-cycle overlay insights</li>
+            <li>✅ Secure email delivery</li>
+          </ul>
+          <button
+            disabled={buyDisabled}
+            onClick={() => handleBuy("one_time")}
+            className="w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white py-3 font-medium transition disabled:opacity-60 disabled:hover:bg-blue-600"
+          >
+            {isLoading === "one_time" ? "Redirecting…" : "Buy One-Time Report"}
+          </button>
+        </div>
+
+        {/* ANNUAL */}
+        <div className="rounded-2xl border border-gray-200 p-6 shadow-sm hover:shadow-md transition-all bg-white">
+          <h2 className="text-2xl font-semibold mb-2">Annual Plan</h2>
+          <p className="text-gray-500 mb-4">For proactive investors who want updates.</p>
+          <div className="text-4xl font-bold mb-4">$199/yr</div>
+          <ul className="text-sm text-gray-600 space-y-2 mb-6">
+            <li>✅ Everything in the One-Time plan</li>
+            <li>✅ Three additional quarterly updates</li>
+            <li>✅ Market regime monitoring</li>
+            <li>✅ Priority email support</li>
+          </ul>
+          <button
+            disabled={buyDisabled}
+            onClick={() => handleBuy("annual")}
+            className="w-full rounded-lg bg-green-600 hover:bg-green-700 text-white py-3 font-medium transition disabled:opacity-60 disabled:hover:bg-green-600"
+          >
+            {isLoading === "annual" ? "Redirecting…" : "Buy Annual Plan"}
+          </button>
+        </div>
+      </div>
+
+      {/* RIA Agreement acknowledgment */}
+      <div ref={riaRef} className="mt-2 rounded-lg border border-gray-200 p-4 bg-white">
         <label className="flex items-start gap-3 text-sm">
           <input
             type="checkbox"
             className="mt-1 h-4 w-4"
-            checked={prelimAccepted}
-            onChange={(e) => setPrelimAccepted(e.target.checked)}
+            checked={riaAccepted}
+            onChange={(e) => setRiaAccepted(e.target.checked)}
           />
-          <span>
-            I have a <strong>preliminary grade</strong> saved for this order.
-            {!hasPrelim && (
-              <>
-                {" "}
-                <a href="/grade/new" className="text-blue-600 hover:underline">
-                  Get your grade first
-                </a>{" "}
-                to continue.
-              </>
-            )}
+        <span>
+            I have read and agree to the{" "}
+            <a href="/legal/ria" className="text-blue-600 hover:underline">
+              Registered Investment Advisory Agreement
+            </a>
+            .
           </span>
         </label>
-        {!hasPrelim && (
+        {!riaAccepted && (
           <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 inline-block">
-            No preliminary grade found. Please grade your current 401(k) first; we use this to build your PDF.
+            Please check this box to enable checkout.
           </p>
         )}
       </div>
-
-      {/* ...pricing cards with buyDisabled... */}
-
-      {/* RIA Agreement box (unchanged) */}
-      {/* Promo code box (unchanged) */}
     </main>
   );
 }
