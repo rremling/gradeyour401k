@@ -18,9 +18,15 @@ async function maybeLoadPreview(previewId: string): Promise<PreviewData | null> 
   if (!previewId) return null;
   try {
     const rows = await query<{
-      provider: string; profile: string; rows: any; grade_base: number; grade_adjusted: number;
+      provider: string;
+      profile: string;
+      rows: any;
+      grade_base: number;
+      grade_adjusted: number;
     }>(
-      `select provider, profile, rows, grade_base, grade_adjusted from previews where id = $1`,
+      `select provider, profile, rows, grade_base, grade_adjusted
+         from previews
+        where id = $1`,
       [previewId]
     );
     if (!rows?.length) return null;
@@ -38,8 +44,8 @@ async function maybeLoadPreview(previewId: string): Promise<PreviewData | null> 
   }
 }
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = "nodejs";         // ensure Node runtime (not Edge)
+export const dynamic = "force-dynamic";  // avoid caching
 
 export async function POST(req: NextRequest) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -49,9 +55,10 @@ export async function POST(req: NextRequest) {
     return new NextResponse("Config error", { status: 500 });
   }
 
+  // --- Verify signature against RAW body ---
   let event: Stripe.Event;
   try {
-    const raw = Buffer.from(await req.arrayBuffer());   // RAW BODY
+    const raw = Buffer.from(await req.arrayBuffer()); // RAW BODY
     const sig = req.headers.get("stripe-signature") as string;
     const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
     event = stripe.webhooks.constructEvent(raw, sig, secret);
@@ -63,89 +70,135 @@ export async function POST(req: NextRequest) {
   try {
     console.log("[webhook] event", event.id, event.type);
 
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const email =
-        session.customer_details?.email ||
-        (session.customer_email as string) ||
-        "";
-      const previewId = (session.metadata?.previewId as string) || "";
-      const planKey = (session.metadata?.planKey as "one_time" | "annual") || "one_time";
-
-      console.log("[webhook] parsed", { email, previewId, planKey, amount: session.amount_total, currency: session.currency });
-
-      // 1) Upsert order
-      try {
-        const id = uuid4();
-        const previewUUID =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(previewId)
-            ? previewId
-            : null;
-
-        await query(
-          `insert into orders
-             (id, created_at, stripe_session_id, plan_key, email, customer_email, preview_id, amount_cents, currency)
-           values
-             ($1, now(), $2, $3, $4, $4, $5, $6, $7)
-           on conflict (stripe_session_id) do update set
-             customer_email = excluded.customer_email,
-             plan_key = excluded.plan_key,
-             amount_cents = excluded.amount_cents,
-             currency = excluded.currency`,
-          [
-            id,
-            session.id,
-            planKey,
-            email || null,
-            previewUUID,
-            session.amount_total || null,
-            session.currency || null,
-          ]
-        );
-        console.log("[webhook] order upserted");
-      } catch (e: any) {
-        console.error("[webhook] order insert failed:", e?.message || e);
-      }
-
-      // 2) Build data
-      let data: PreviewData | null = await maybeLoadPreview(previewId);
-      if (!data) data = { provider: "", profile: "Growth", rows: [], grade_base: 0, grade_adjusted: 0 };
-
-      // 3) Market regime + PDF
-      const regime = await getMarketRegime();
-      console.log("[webhook] regime ready");
-      const pdf = await buildReportPDF({ ...data, market_regime: regime });
-      console.log("[webhook] pdf built", pdf.length, "bytes");
-
-      // 4) Email
-      if (email) {
-        await sendReportEmail({
-          to: email,
-          subject:
-            planKey === "annual"
-              ? "Your GradeYour401k Annual Plan — First Report"
-              : "Your GradeYour401k One-Time Report",
-          html:
-            `<p>Thanks for your purchase!</p>` +
-            (data.rows.length
-              ? `<p>Your report is attached. Provider: <strong>${data.provider}</strong>; Profile: <strong>${data.profile}</strong>.</p>`
-              : `<p>Please complete your holdings to enhance your report: <a href="${process.env.NEXT_PUBLIC_BASE_URL || ""}/grade/new">Finish inputs</a>.</p>`) +
-            `<p>— GradeYour401k</p>`,
-          attachment: { filename: "GradeYour401k-Report.pdf", content: pdf },
-        });
-        console.log("[webhook] email sent");
-
-        try {
-          await query(`update orders set delivered_at = now() where stripe_session_id = $1`, [session.id]);
-          console.log("[webhook] order marked delivered");
-        } catch (e: any) {
-          console.warn("[webhook] mark delivered failed:", e?.message || e);
-        }
-      } else {
-        console.warn("[webhook] missing email");
-      }
+    if (event.type !== "checkout.session.completed") {
+      // Acknowledge unrelated events quickly
+      return NextResponse.json({ received: true });
     }
 
+    const session = event.data.object as Stripe.Checkout.Session;
+
+    // Accept both paid and no_payment_required (covers 100% discount / $0 total)
+    const paidOrFree =
+      session.payment_status === "paid" ||
+      session.payment_status === "no_payment_required";
+
+    if (!paidOrFree) {
+      console.log("[webhook] session not paid/free; ignoring", {
+        status: session.payment_status,
+      });
+      return NextResponse.json({ received: true });
+    }
+
+    // Prefer customer_details.email (customer_email can be null)
+    const email =
+      session.customer_details?.email ||
+      (session.customer_email as string) ||
+      "";
+
+    const previewId = (session.metadata?.previewId as string) || "";
+    const planKey =
+      (session.metadata?.planKey as "one_time" | "annual") || "one_time";
+
+    const amountCents = typeof session.amount_total === "number" ? session.amount_total : 0;
+    const currency = session.currency || null;
+
+    console.log("[webhook] parsed", {
+      email,
+      previewId,
+      planKey,
+      amount: amountCents,
+      currency,
+      payment_status: session.payment_status,
+    });
+
+    // --- 1) Upsert order (FIXED: 9 columns -> 9 values) ---
+    try {
+      const id = uuid4();
+      const previewUUID =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          previewId
+        )
+          ? previewId
+          : null;
+
+      await query(
+        `insert into orders
+           (id, created_at, stripe_session_id, plan_key, email, customer_email, preview_id, amount_cents, currency)
+         values
+           ($1, now(), $2, $3, $4, $5, $6, $7, $8)
+         on conflict (stripe_session_id) do update set
+           customer_email = excluded.customer_email,
+           plan_key       = excluded.plan_key,
+           amount_cents   = excluded.amount_cents,
+           currency       = excluded.currency`,
+        [
+          id,                 // $1
+          session.id,         // $2
+          planKey,            // $3
+          email || null,      // $4 (email)
+          email || null,      // $5 (customer_email) - same for now
+          previewUUID,        // $6
+          amountCents,        // $7
+          currency,           // $8
+        ]
+      );
+      console.log("[webhook] order upserted");
+    } catch (e: any) {
+      console.error("[webhook] order insert failed:", e?.message || e);
+      // continue; don't fail the webhook
+    }
+
+    // --- 2) Load preview data (optional) ---
+    let data: PreviewData | null = await maybeLoadPreview(previewId);
+    if (!data)
+      data = {
+        provider: "",
+        profile: "Growth",
+        rows: [],
+        grade_base: 0,
+        grade_adjusted: 0,
+      };
+
+    // --- 3) Market regime + PDF (keep it fast; Stripe allows ~10s total) ---
+    const regime = await getMarketRegime();
+    console.log("[webhook] regime ready");
+    const pdf = await buildReportPDF({ ...data, market_regime: regime });
+    console.log("[webhook] pdf built", pdf.length, "bytes");
+
+    // --- 4) Email delivery ---
+    if (email) {
+      await sendReportEmail({
+        to: email,
+        subject:
+          planKey === "annual"
+            ? "Your GradeYour401k Annual Plan — First Report"
+            : "Your GradeYour401k One-Time Report",
+        html:
+          `<p>Thanks for your purchase!</p>` +
+          (data.rows.length
+            ? `<p>Your report is attached. Provider: <strong>${data.provider}</strong>; Profile: <strong>${data.profile}</strong>.</p>`
+            : `<p>Please complete your holdings to enhance your report: <a href="${
+                process.env.NEXT_PUBLIC_BASE_URL || ""
+              }/grade/new">Finish inputs</a>.</p>`) +
+          `<p>— GradeYour401k</p>`,
+        attachment: { filename: "GradeYour401k-Report.pdf", content: pdf },
+      });
+      console.log("[webhook] email sent");
+
+      try {
+        await query(
+          `update orders set delivered_at = now() where stripe_session_id = $1`,
+          [session.id]
+        );
+        console.log("[webhook] order marked delivered");
+      } catch (e: any) {
+        console.warn("[webhook] mark delivered failed:", e?.message || e);
+      }
+    } else {
+      console.warn("[webhook] missing email");
+    }
+
+    // Always ACK successful handling
     return NextResponse.json({ received: true });
   } catch (err: any) {
     console.error("[webhook] handler error:", err?.message || err);
