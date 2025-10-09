@@ -1,8 +1,6 @@
-// src/app/success/page.tsx
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 
 export default function SuccessPage({
   searchParams,
@@ -20,7 +18,7 @@ export default function SuccessPage({
       const res = await fetch("/api/report/generate-and-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }), // 👈 send session id
+        body: JSON.stringify({ sessionId }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -39,7 +37,7 @@ export default function SuccessPage({
   return (
     <main className="mx-auto max-w-2xl p-6 space-y-6">
       <h1 className="text-2xl font-bold">Payment confirmed</h1>
-      <p>Thanks for your purchase! Your PDF report will be emailed to you.</p>
+      <p>Thanks for your purchase! Your PDF report has been emailed to you.</p>
 
       <div className="flex gap-3">
         <button
@@ -49,12 +47,6 @@ export default function SuccessPage({
         >
           {status === "sending" ? "Sending…" : "Resend report"}
         </button>
-        <Link
-          href="/grade/new"
-          className="rounded-lg border px-4 py-2 hover:bg-gray-50"
-        >
-          Edit inputs (improve report)
-        </Link>
       </div>
 
       {msg && (
