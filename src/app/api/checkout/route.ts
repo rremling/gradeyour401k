@@ -1,111 +1,69 @@
-"use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-// ...existing imports/types/utilities...
+// src/app/api/checkout/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import Stripe from "stripe";
 
-export default function PricingPage() {
-  const [isLoading, setIsLoading] = useState<"one_time" | "annual" | null>(null);
-  const [riaAccepted, setRiaAccepted] = useState(false);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-  // NEW: preliminary grade gate
-  const [hasPrelim, setHasPrelim] = useState(false);
-  const [prelimAccepted, setPrelimAccepted] = useState(false);
-  const [previewId, setPreviewId] = useState<string | null>(null);
+function getBaseUrl() {
+  const env = process.env.NEXT_PUBLIC_BASE_URL?.trim();
+  if (env) return env.replace(/\/+$/, "");
+  return process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000";
+}
 
-  useEffect(() => {
-    const id = typeof window !== "undefined" ? localStorage.getItem("gy4k_preview_id") : null;
-    if (id) {
-      setPreviewId(id);
-      setHasPrelim(true);
-      setPrelimAccepted(true); // auto-check if found
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({}));
+    const planKey = (body?.planKey as "one_time" | "annual") || "one_time";
+    const previewId = (body?.previewId as string | undefined) || "";
+    const promotionCodeId = (body?.promotionCodeId as string | undefined) || undefined;
+
+    const secret = process.env.STRIPE_SECRET_KEY;
+    if (!secret) {
+      return NextResponse.json({ error: "Missing STRIPE_SECRET_KEY" }, { status: 500 });
+    }
+
+    const priceOneTime = process.env.STRIPE_PRICE_ID_ONE_TIME || process.env.STRIPE_PRICE_ID_DEFAULT;
+    const priceAnnual = process.env.STRIPE_PRICE_ID_ANNUAL;
+
+    const isSubscription = planKey === "annual";
+    const priceId = isSubscription ? priceAnnual : priceOneTime;
+    if (!priceId) {
+      return NextResponse.json(
+        { error: isSubscription ? "Missing STRIPE_PRICE_ID_ANNUAL" : "Missing STRIPE_PRICE_ID_ONE_TIME (or STRIPE_PRICE_ID_DEFAULT)" },
+        { status: 500 }
+      );
+    }
+
+    const stripe = new Stripe(secret, { apiVersion: "2024-06-20" });
+    const origin = getBaseUrl();
+
+    const params: Stripe.Checkout.SessionCreateParams = {
+      mode: isSubscription ? "subscription" : "payment",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/pricing`,
+      metadata: { planKey, previewId },
+    };
+
+    // Only allowed for payment mode
+    if (!isSubscription) {
+      // @ts-expect-error - valid in payment mode only
+      params.customer_creation = "always";
+    }
+
+    // Exactly one of these:
+    if (promotionCodeId) {
+      params.discounts = [{ promotion_code: promotionCodeId }];
     } else {
-      setPreviewId(null);
-      setHasPrelim(false);
-      setPrelimAccepted(false);
-    }
-  }, []);
-
-  // ...promo code state...
-
-  async function handleBuy(planKey: "one_time" | "annual") {
-    setError(null);
-
-    if (!prelimAccepted || !hasPrelim || !previewId) {
-      // strong nudge to get a grade first
-      window.location.href = "/grade/new";
-      return;
+      params.allow_promotion_codes = true;
     }
 
-    if (!riaAccepted) {
-      riaRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
-    try {
-      setIsLoading(planKey);
-      const res = await fetch("/api/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          planKey,
-          promotionCodeId: applied?.id || undefined,
-          previewId, // 👈 pass through to metadata
-        }),
-      });
-      const data = await res.json();
-      if (data?.url) {
-        window.location.href = data.url as string;
-      } else {
-        setError(data?.error || "Checkout failed. Please try again.");
-      }
-    } catch (err) {
-      console.error(err);
-      setError("Failed to start checkout. Please try again.");
-    } finally {
-      setIsLoading(null);
-    }
+    const session = await stripe.checkout.sessions.create(params);
+    return NextResponse.json({ url: session.url });
+  } catch (err: any) {
+    const msg = err?.raw?.message || err?.message || "Failed to start Checkout";
+    console.error("checkout error:", msg);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  const buyDisabled = useMemo(
-    () => !riaAccepted || !prelimAccepted || isLoading !== null,
-    [riaAccepted, prelimAccepted, isLoading]
-  );
-
-  return (
-    <main className="mx-auto max-w-4xl px-6 py-10 space-y-8">
-      {/* ...header... */}
-
-      {/* Preliminary Grade gate */}
-      <div className="rounded-lg border border-gray-200 p-4 bg-white">
-        <label className="flex items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-1 h-4 w-4"
-            checked={prelimAccepted}
-            onChange={(e) => setPrelimAccepted(e.target.checked)}
-          />
-          <span>
-            I have a <strong>preliminary grade</strong> saved for this order.
-            {!hasPrelim && (
-              <>
-                {" "}
-                <a href="/grade/new" className="text-blue-600 hover:underline">
-                  Get your grade first
-                </a>{" "}
-                to continue.
-              </>
-            )}
-          </span>
-        </label>
-        {!hasPrelim && (
-          <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 inline-block">
-            No preliminary grade found. Please grade your current 401(k) first; we use this to build your PDF.
-          </p>
-        )}
-      </div>
-
-      {/* ...pricing cards with buyDisabled... */}
-
-      {/* RIA Agreement box (unchanged) */}
-      {/* Promo code box (unchanged) */}
-    </main>
-  );
 }
