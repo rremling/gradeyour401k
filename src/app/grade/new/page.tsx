@@ -191,4 +191,128 @@ export default function GradeNewPage() {
       <section className="space-y-2">
         <label className="text-sm font-medium">1) Select your provider</label>
         <select
-          className="w-full border rounded
+          className="w-full border rounded-md p-2"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value as ProviderKey)}
+        >
+          <option value="fidelity">Fidelity</option>
+          <option value="vanguard">Vanguard</option>
+          <option value="schwab">Charles Schwab</option>
+          <option value="invesco">Invesco</option>
+          <option value="blackrock">BlackRock / iShares</option>
+          <option value="statestreet">State Street / SPDR</option>
+          <option value="voya">Voya</option>
+          <option value="other">Other provider</option>
+        </select>
+      </section>
+
+      <section className="space-y-2">
+        <label className="text-sm font-medium">2) Your investor profile</label>
+        <select
+          className="w-full border rounded-md p-2"
+          value={profile}
+          onChange={(e) => setProfile(e.target.value as InvestorProfile)}
+        >
+          <option value="Aggressive Growth">Aggressive Growth</option>
+          <option value="Growth">Growth</option>
+          <option value="Balanced">Balanced</option>
+        </select>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium">3) Enter your current holdings</div>
+          {/* Toggleable provider list */}
+          <button
+            type="button"
+            className="text-sm underline hover:no-underline"
+            onClick={() => setShowAddList((s) => !s)}
+          >
+            {showAddList ? "Hide provider list" : `Add from ${PROVIDER_DISPLAY[provider]} list`}
+          </button>
+        </div>
+
+        {/* Hidden dropdown when not in use */}
+        {showAddList && providerTickers.length > 0 && (
+          <div className="rounded-md border p-3 flex gap-2 items-center bg-white">
+            <select
+              className="border rounded-md p-2 w-full md:w-80"
+              value={selectedTicker}
+              onChange={(e) => setSelectedTicker(e.target.value)}
+            >
+              <option value="">Select a ticker</option>
+              {providerTickers.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="border rounded-md px-3 py-2 hover:bg-gray-50"
+              onClick={addSelectedTicker}
+              disabled={!selectedTicker}
+            >
+              Add
+            </button>
+          </div>
+        )}
+
+        {rows.map((row, i) => (
+          <div key={i} className="grid grid-cols-12 gap-3">
+            <input
+              className="col-span-7 border rounded-md p-2"
+              placeholder="Symbol (e.g., FSKAX)"
+              value={row.symbol}
+              onChange={(e) => updateRow(i, "symbol", e.target.value)}
+            />
+            <input
+              type="number"
+              inputMode="decimal"
+              className="col-span-3 border rounded-md p-2"
+              placeholder="Weight %"
+              value={row.weight}
+              onChange={(e) => updateRow(i, "weight", e.target.value)}
+            />
+            <button
+              type="button"
+              className="col-span-2 border rounded-md px-3 py-2 hover:bg-gray-50"
+              onClick={() => removeRow(i)}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={addRow}
+            className="border rounded-md px-3 py-2 hover:bg-gray-50"
+          >
+            Add holding
+          </button>
+          <div className="text-sm text-gray-600">Total: {total.toFixed(1)}%</div>
+        </div>
+      </section>
+
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          className={`rounded-lg px-5 py-3 text-white ${
+            canSubmit ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-400 cursor-not-allowed"
+          }`}
+        >
+          {saving ? "Saving…" : "Preview grade"}
+        </button>
+        {!canSubmit && (
+          <p className="mt-2 text-xs text-gray-500">
+            Choose a provider and make sure weights sum to 100%.
+          </p>
+        )}
+      </div>
+    </main>
+  );
+}
