@@ -1,9 +1,8 @@
 // src/app/grade/results/page.tsx
 import Link from "next/link";
-import { sql } from "../../../lib/db"; // adjust if your path alias differs
+import { sql } from "../../../lib/db"; // adjust if your alias/path differs
 
 type SearchParams = { previewId?: string };
-
 type Holding = { symbol: string; weight: number };
 
 // Server-rendered stepper (no hooks)
@@ -59,25 +58,34 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-// --- Simple “reasons” computation mirroring the grade page ---
-function computeReasons(rows: Holding[]) {
+/** Compute a simple preliminary grade from holdings + profile.
+ * Matches the lightweight logic used on the grade page:
+ * - Base by profile
+ * - Penalty if weights don’t sum ~100%
+ * - Penalty for concentration (largest position > 60%)
+ * - Clamp to [1,5] with half-star rounding
+ */
+function computePrelimGrade(profile: string, rows: Holding[]): number {
   const weights = rows.map((r) => (Number.isFinite(r.weight) ? r.weight : 0));
   const total = weights.reduce((s, n) => s + n, 0);
-  const reasons: string[] = [];
 
-  // total near 100%
+  let base =
+    profile === "Aggressive Growth" ? 4.5 : profile === "Balanced" ? 3.8 : 4.1;
+
+  // Penalize if not around 100%
   const off = Math.abs(100 - total);
   if (off > 0.25) {
-    reasons.push(`Weights sum to ${total.toFixed(1)}% (target 100%).`);
+    const p = Math.min(1, off / 100); // max -1.0
+    base -= p;
   }
 
-  // concentration
+  // Penalize high concentration
   const maxWt = Math.max(0, ...weights);
-  if (maxWt > 60) {
-    reasons.push(`High concentration: top position is ${maxWt.toFixed(1)}%.`);
-  }
+  if (maxWt > 60) base -= 0.2;
 
-  return { reasons, total };
+  // Clamp and half-star round
+  const score = Math.max(1, Math.min(5, Math.round(base * 2) / 2));
+  return score;
 }
 
 export default async function ResultPage({
@@ -137,15 +145,8 @@ export default async function ResultPage({
 
   const providerDisplay: string = p.provider_display || p.provider || "—";
   const profile: string = p.profile || "—";
-  const numericGrade =
-    typeof p.grade_adjusted === "number"
-      ? p.grade_adjusted
-      : typeof p.grade_base === "number"
-      ? p.grade_base
-      : null;
-  const grade = numericGrade !== null ? numericGrade.toFixed(1) : "—";
 
-  // Parse rows (DB column "rows" may already be an array or a JSON string)
+  // Parse holdings
   let holdings: Holding[] = [];
   try {
     const raw = p.rows;
@@ -160,7 +161,22 @@ export default async function ResultPage({
     holdings = [];
   }
 
-  const { reasons, total } = computeReasons(holdings);
+  // Use stored grade if present; otherwise compute preliminary from holdings/profile
+  const numericGrade: number | null =
+    typeof p.grade_adjusted === "number"
+      ? p.grade_adjusted
+      : typeof p.grade_base === "number"
+      ? p.grade_base
+      : holdings.length > 0
+      ? computePrelimGrade(profile, holdings)
+      : null;
+
+  const grade = numericGrade !== null ? numericGrade.toFixed(1) : "—";
+
+  const total = holdings.reduce(
+    (s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0),
+    0
+  );
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
@@ -169,8 +185,8 @@ export default async function ResultPage({
       <header className="space-y-2">
         <h1 className="text-2xl font-bold">Your Grade</h1>
         <p className="text-gray-600">
-          Provider: <span className="font-medium">{providerDisplay}</span> · Profile:{" "}
-          <span className="font-medium">{profile}</span>
+          Provider: <span className="font-medium">{providerDisplay}</span> ·
+          {" "}Profile: <span className="font-medium">{profile}</span>
         </p>
       </header>
 
@@ -178,8 +194,8 @@ export default async function ResultPage({
       <section className="rounded-lg border p-6 bg-white space-y-3">
         <div className="text-3xl">⭐ {grade} / 5</div>
         <p className="text-sm text-gray-600">
-          This is a preview grade. The full paid PDF includes model comparison, market cycle overlay,
-          and personalized increase/decrease guidance.
+          This is a preliminary grade. The paid PDF sharpens this with model comparison,
+          market cycle overlay, and specific increase/decrease guidance.
         </p>
       </section>
 
@@ -203,21 +219,17 @@ export default async function ResultPage({
         )}
       </section>
 
-      {/* Reasons (preview bullets) */}
+      {/* What you get with the full report (replaces “reasons”) */}
       <section className="rounded-lg border p-6 bg-white">
-        <h2 className="font-semibold">Why you received this grade</h2>
-        {reasons.length === 0 ? (
-          <p className="text-sm text-gray-600 mt-2">
-            Looks balanced for your selected profile. The full report can still reveal fees, overlaps,
-            and optimization opportunities.
-          </p>
-        ) : (
-          <ul className="list-disc list-inside text-sm text-gray-800 mt-2 space-y-1">
-            {reasons.map((r, i) => (
-              <li key={i}>{r}</li>
-            ))}
-          </ul>
-        )}
+        <h2 className="font-semibold">What you get with the full report</h2>
+        <ul className="list-disc list-inside text-sm text-gray-800 mt-2 space-y-1">
+          <li>Model comparison vs. curated ETF allocations for your profile.</li>
+          <li>Market cycle overlay (SPY 30/50/100/200-day SMA) to sensibly tilt risk.</li>
+          <li>Actionable “increase / decrease / replace” guidance with a reallocation roadmap.</li>
+          <li>Fee and diversification diagnostics; sector/factor exposure view.</li>
+          <li>Shareable star grade, delivered as a polished PDF to your inbox.</li>
+          <li>Annual plan includes 3 additional re-grades over the next 12 months.</li>
+        </ul>
       </section>
 
       {/* CTA buttons */}
