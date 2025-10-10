@@ -1,6 +1,6 @@
 // src/app/api/preview/save/route.ts
 import { NextRequest } from "next/server";
-// Use a relative import to avoid tsconfig path alias issues in prod:
+// Use RELATIVE import to avoid tsconfig path alias issues in prod builds
 import { sql } from "../../../../lib/db";
 
 export const runtime = "nodejs";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 type HoldingIn = { symbol: string; weight: number };
 
-function j(status: number, data: any) {
+function j(status: number, data: unknown) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },
@@ -28,104 +28,117 @@ async function ensureTable() {
       grade_adjusted NUMERIC,
       ip TEXT
     );
-    CREATE INDEX IF NOT EXISTS previews_created_at_idx ON previews (created_at DESC);
+    CREATE INDEX IF NOT EXISTS previews_created_at_idx
+      ON previews (created_at DESC);
   `);
 }
 
+export async function GET() {
+  return j(200, { ok: true, route: "/api/preview/save" });
+}
+
 export async function POST(req: NextRequest) {
+  // Quick config sanity
+  if (!process.env.DATABASE_URL) {
+    console.error("[preview/save] Missing DATABASE_URL env var");
+    return j(500, { error: "Server DB not configured (DATABASE_URL missing)" });
+  }
+
+  // Parse body
+  let body: any = null;
   try {
-    const body = await req.json().catch(() => null);
-    if (!body) return j(400, { error: "Invalid JSON" });
+    body = await req.json();
+  } catch {
+    return j(400, { error: "Invalid JSON" });
+  }
 
-    const {
-      provider,
-      provider_display,
-      profile,
-      rows,
-      grade_base,
-      grade_adjusted,
-    } = body as {
-      provider?: string;
-      provider_display?: string;
-      profile?: string;
-      rows?: HoldingIn[];
-      grade_base?: number;
-      grade_adjusted?: number;
-    };
+  const {
+    provider,
+    provider_display,
+    profile,
+    rows,
+    grade_base,
+    grade_adjusted,
+  } = (body ?? {}) as {
+    provider?: string;
+    provider_display?: string;
+    profile?: string;
+    rows?: HoldingIn[];
+    grade_base?: number;
+    grade_adjusted?: number;
+  };
 
-    if (
-      !provider ||
-      !provider_display ||
-      !profile ||
-      !Array.isArray(rows) ||
-      rows.length === 0
-    ) {
-      return j(400, {
-        error:
-          "Missing required fields (provider, provider_display, profile, rows[])",
-      });
+  // Basic validation
+  if (
+    !provider ||
+    !provider_display ||
+    !profile ||
+    !Array.isArray(rows) ||
+    rows.length === 0
+  ) {
+    return j(400, {
+      error:
+        "Missing required fields (provider, provider_display, profile, rows[])",
+    });
+  }
+
+  // Normalize rows
+  const cleanRows = rows
+    .map((r) => ({
+      symbol: String(r.symbol || "").toUpperCase().trim(),
+      weight: Number(r.weight),
+    }))
+    .filter((r) => r.symbol && !Number.isNaN(r.weight));
+
+  if (cleanRows.length === 0) {
+    return j(400, { error: "No valid rows provided" });
+  }
+
+  const ip =
+    req.headers.get("x-forwarded-for") ||
+    // @ts-ignore – Next’s Request doesn’t expose ip in types
+    (req as any).ip ||
+    req.headers.get("x-real-ip") ||
+    null;
+
+  // Try insert; if table missing, create and retry once
+  try {
+    const res = await sql<{ id: string }>(
+      `
+      INSERT INTO previews (provider, provider_display, profile, rows, grade_base, grade_adjusted, ip)
+      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+      RETURNING id
+    `,
+      [
+        provider,
+        provider_display,
+        profile,
+        JSON.stringify(cleanRows),
+        grade_base ?? null,
+        grade_adjusted ?? null,
+        ip,
+      ]
+    );
+
+    const id = res.rows?.[0]?.id;
+    if (!id) {
+      console.error("[preview/save] insert returned no id");
+      return j(500, { error: "Failed to create preview id" });
     }
-
-    const cleanRows = rows
-      .map((r) => ({
-        symbol: String(r.symbol || "").toUpperCase().trim(),
-        weight: Number(r.weight),
-      }))
-      .filter((r) => r.symbol && !Number.isNaN(r.weight));
-
-    if (cleanRows.length === 0) {
-      return j(400, { error: "No valid rows provided" });
-    }
-
-    // attempt insert, auto-create table if missing
-    try {
-      const ip =
-        req.headers.get("x-forwarded-for") ||
-        req.ip ||
-        req.headers.get("x-real-ip") ||
-        null;
-
-      const result = await sql<{ id: string }>(
-        `
-        INSERT INTO previews (provider, provider_display, profile, rows, grade_base, grade_adjusted, ip)
-        VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-        RETURNING id
-        `,
-        [
-          provider,
-          provider_display,
-          profile,
-          JSON.stringify(cleanRows),
-          grade_base ?? null,
-          grade_adjusted ?? null,
-          ip,
-        ]
-      );
-
-      const id = result.rows?.[0]?.id;
-      if (!id) {
-        console.error("[preview/save] insert returned no id");
-        return j(500, { error: "Failed to create preview id" });
-      }
-
-      return j(200, { ok: true, id });
-    } catch (e: any) {
-      const msg = String(e?.message || e);
-      // If table doesn't exist, create it once and retry
-      if (msg.includes("relation") && msg.includes("does not exist")) {
-        console.warn("[preview/save] table missing, creating…");
+    return j(200, { ok: true, id });
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    // If table doesn’t exist, create once and retry
+    if (msg.includes("relation") && msg.includes("does not exist")) {
+      console.warn("[preview/save] table missing, creating…");
+      try {
         await ensureTable();
-        const ip =
-          req.headers.get("x-forwarded-for") ||
-          req.ip ||
-          req.headers.get("x-real-ip") ||
-          null;
-        const result2 = await sql<{ id: string }>(
+        const res2 = await sql<{ id: string }>(
           `
           INSERT INTO previews (provider, provider_display, profile, rows, grade_base, grade_adjusted, ip)
           VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
           RETURNING id
-          `,
+        `,
           [
             provider,
             provider_display,
@@ -136,19 +149,27 @@ export async function POST(req: NextRequest) {
             ip,
           ]
         );
-        const id2 = result2.rows?.[0]?.id;
+        const id2 = res2.rows?.[0]?.id;
         if (!id2) {
-          console.error("[preview/save] insert after create returned no id");
-          return j(500, { error: "Failed to create preview id (after create)" });
+          console.error("[preview/save] insert-after-create returned no id");
+          return j(500, {
+            error: "Failed to create preview id (after table create)",
+          });
         }
         return j(200, { ok: true, id: id2 });
+      } catch (e2: any) {
+        console.error(
+          "[preview/save] create/insert retry failed:",
+          e2?.message || e2
+        );
+        // TEMP: return the exact error to help you fix quickly
+        return j(500, { error: "DB insert (after create) failed", detail: String(e2?.message || e2) });
       }
-
-      console.error("[preview/save] insert error:", msg);
-      return j(500, { error: "DB insert failed" });
     }
-  } catch (e: any) {
-    console.error("[preview/save] fatal error:", e?.message || e);
-    return j(500, { error: "Server error saving preview" });
+
+    // Other DB error
+    console.error("[preview/save] insert error:", msg);
+    // TEMP: return the exact error back (remove detail in production)
+    return j(500, { error: "DB insert failed", detail: msg });
   }
 }
