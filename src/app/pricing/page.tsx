@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
-// ---- Stepper (1:Get Grade, 2:Review, 3:Purchase, 4:Report Sent) ----
+/* ---------- Responsive Stepper (same header style as other pages) ---------- */
 function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -15,7 +15,48 @@ function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
 
   return (
     <div className="w-full">
-      <ol className="flex items-center gap-3 text-sm">
+      {/* Mobile: compact + scrollable */}
+      <ol className="flex items-center gap-2 text-xs sm:hidden overflow-x-auto no-scrollbar py-1">
+        {steps.map((s, idx) => {
+          const isActive = s.n === current;
+          const isComplete = s.n < current;
+          return (
+            <li key={s.n} className="flex items-center gap-2 shrink-0">
+              <div
+                className={[
+                  "flex h-6 w-6 items-center justify-center rounded-full border text-[10px] font-semibold",
+                  isActive
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : isComplete
+                    ? "border-blue-600 text-blue-600"
+                    : "border-gray-300 text-gray-600",
+                ].join(" ")}
+              >
+                {s.n}
+              </div>
+              <span
+                className={[
+                  "whitespace-nowrap",
+                  isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                ].join(" ")}
+              >
+                {s.label}
+              </span>
+              {idx < steps.length - 1 && (
+                <div
+                  className={[
+                    "mx-2 h-px w-8",
+                    isComplete ? "bg-blue-600" : "bg-gray-300",
+                  ].join(" ")}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+
+      {/* Desktop: full size */}
+      <ol className="hidden sm:flex items-center gap-3 text-sm">
         {steps.map((s, idx) => {
           const isActive = s.n === current;
           const isComplete = s.n < current;
@@ -57,6 +98,7 @@ function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
+/* ---------------------- pricing + checkout logic (unchanged) ---------------------- */
 const ONE_TIME_PRICE_USD = Number(process.env.NEXT_PUBLIC_PRICE_ONE_TIME || 79);
 const ANNUAL_PRICE_USD = Number(process.env.NEXT_PUBLIC_PRICE_ANNUAL || 149);
 
@@ -255,14 +297,12 @@ export default function PricingPage() {
           <p className="text-gray-600 mt-2">
             Personalized PDF with your grade, model comparison, and allocation guidance.
           </p>
-
           {/* bullets */}
           <ul className="mt-4 text-sm text-gray-700 list-disc list-inside space-y-1">
             <li>PDF delivered by email</li>
             <li>Market cycle overlay (SPY SMA)</li>
             <li>Shareable star grade</li>
           </ul>
-
           {/* buy button moved below bullets */}
           <button
             className="mt-6 rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
@@ -291,14 +331,12 @@ export default function PricingPage() {
           <p className="text-gray-600 mt-2">
             Includes the initial report plus 3 more updates over the next 12 months.
           </p>
-
           {/* bullets */}
           <ul className="mt-4 text-sm text-gray-700 list-disc list-inside space-y-1">
             <li>Initial PDF report</li>
             <li>3 quarterly updates</li>
             <li>Priority support</li>
           </ul>
-
           {/* buy button moved below bullets */}
           <button
             className="mt-6 rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
@@ -340,7 +378,7 @@ export default function PricingPage() {
             placeholder="ENTER CODE"
             maxLength={40}
           />
-        <button
+          <button
             className="rounded-md border px-4 py-2 hover:bg-gray-50 disabled:opacity-50"
             onClick={applyPromo}
             disabled={applying}
