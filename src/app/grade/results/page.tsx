@@ -1,92 +1,117 @@
 // src/app/grade/result/page.tsx
-import Link from "next/link";
+"use client";
 
-type SearchParams = {
-  provider?: string;
-  profile?: string;
-  grade?: string;
-  previewId?: string;
-};
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 type PreviewRow = { symbol: string; weight: number };
+type Preview = {
+  ok: boolean;
+  provider?: string | null;
+  provider_display?: string | null;
+  profile?: string | null;
+  rows?: PreviewRow[];
+  grade_base?: number | null;
+  grade_adjusted?: number | null;
+};
 
-async function fetchPreview(previewId: string) {
-  const base =
-    process.env.NEXT_PUBLIC_BASE_URL ||
-    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+export default function ResultPage() {
+  const sp = useSearchParams();
 
-  try {
-    const res = await fetch(`${base}/api/preview/get?id=${encodeURIComponent(previewId)}`, {
-      // Build time may be static; force dynamic
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as {
-      ok: boolean;
-      provider: string;
-      provider_display?: string;
-      profile: string;
-      rows: PreviewRow[];
-      grade_base?: number;
-      grade_adjusted?: number;
-    } | null;
-  } catch {
-    return null;
-  }
-}
+  const providerParam = sp.get("provider") || "";
+  const profileParam = sp.get("profile") || "";
+  const gradeParam = sp.get("grade") || "—";
+  const previewId = sp.get("previewId") || "";
 
-export default async function ResultPage({ searchParams }: { searchParams: SearchParams }) {
-  const providerParam = searchParams.provider || "";
-  const profile = searchParams.profile || "";
-  const grade = searchParams.grade || "—";
-  const previewId = searchParams.previewId || "";
+  const [loading, setLoading] = useState<boolean>(!!previewId);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  let preview = null as Awaited<ReturnType<typeof fetchPreview>>;
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      if (!previewId) return;
+      try {
+        setLoading(true);
+        const res = await fetch(`/api/preview/get?id=${encodeURIComponent(previewId)}`, {
+          cache: "no-store",
+        });
+        const data = (await res.json()) as Preview;
+        if (!active) return;
+        if (!res.ok || !data?.ok) {
+          setError("Could not load your saved preview.");
+          setPreview(null);
+        } else {
+          setPreview(data);
+          setError(null);
+        }
+      } catch (e: any) {
+        if (!active) return;
+        setError(e?.message || "Failed to fetch preview.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, [previewId]);
 
-  if (previewId) {
-    preview = await fetchPreview(previewId);
-  }
+  const providerDisplay = useMemo(() => {
+    return preview?.provider_display || providerParam || preview?.provider || "—";
+  }, [preview, providerParam]);
 
-  const providerDisplay =
-    preview?.provider_display || providerParam || (preview?.provider ?? "");
+  const rows = preview?.rows || [];
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
       <h1 className="text-2xl font-bold">Your Grade</h1>
 
-      <div className="rounded-lg border p-6 space-y-3">
+      <div className="rounded-lg border p-6 space-y-3 bg-white">
         <p>
           <span className="font-medium">Provider:</span>{" "}
-          {providerDisplay || "—"}
+          {providerDisplay}
         </p>
         <p>
           <span className="font-medium">Profile:</span>{" "}
-          {profile || preview?.profile || "—"}
+          {profileParam || preview?.profile || "—"}
         </p>
-        <p className="text-3xl">⭐ {grade} / 5</p>
+        <p className="text-3xl">⭐ {gradeParam} / 5</p>
         <p className="text-sm text-gray-600">
           This is a preview grade. The full PDF report (with model comparison
           and market overlay) is sent after purchase.
         </p>
       </div>
 
-      {preview?.rows?.length ? (
-        <section className="rounded-lg border p-6">
+      {loading && (
+        <div className="rounded-lg border p-4 bg-white text-sm text-gray-600">
+          Loading your holdings…
+        </div>
+      )}
+      {!loading && error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      {!loading && !error && rows.length > 0 && (
+        <section className="rounded-lg border p-6 bg-white">
           <h2 className="text-lg font-semibold mb-3">Your current holdings</h2>
           <div className="grid grid-cols-12 text-sm font-medium border-b pb-2">
             <div className="col-span-8">Symbol</div>
             <div className="col-span-4 text-right">Weight %</div>
           </div>
           <div className="divide-y">
-            {preview.rows.map((r, idx) => (
-              <div key={idx} className="grid grid-cols-12 py-2 text-sm">
+            {rows.map((r, i) => (
+              <div key={`${r.symbol}-${i}`} className="grid grid-cols-12 py-2 text-sm">
                 <div className="col-span-8">{r.symbol}</div>
-                <div className="col-span-4 text-right">{r.weight.toFixed(1)}</div>
+                <div className="col-span-4 text-right">{Number(r.weight).toFixed(1)}</div>
               </div>
             ))}
           </div>
         </section>
-      ) : null}
+      )}
 
       <div className="flex gap-3">
         <Link
