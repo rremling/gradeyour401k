@@ -14,6 +14,59 @@ type Holding = { symbol: string; weight: number | "" };
 
 const FORM_STORAGE = "gy4k_form_v1";
 
+// ---- Stepper (1:Get Grade, 2:Review, 3:Purchase, 4:Report Sent) ----
+function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
+  const steps = [
+    { n: 1, label: "Get Grade" },
+    { n: 2, label: "Review" },
+    { n: 3, label: "Purchase" },
+    { n: 4, label: "Report Sent" },
+  ] as const;
+
+  return (
+    <div className="w-full">
+      <ol className="flex items-center gap-3 text-sm">
+        {steps.map((s, idx) => {
+          const isActive = s.n === current;
+          const isComplete = s.n < current;
+          return (
+            <li key={s.n} className="flex items-center gap-3">
+              <div
+                className={[
+                  "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
+                  isActive
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : isComplete
+                    ? "border-blue-600 text-blue-600"
+                    : "border-gray-300 text-gray-600",
+                ].join(" ")}
+              >
+                {s.n}
+              </div>
+              <span
+                className={[
+                  "whitespace-nowrap",
+                  isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                ].join(" ")}
+              >
+                {s.label}
+              </span>
+              {idx < steps.length - 1 && (
+                <div
+                  className={[
+                    "mx-2 h-px w-10 md:w-16",
+                    isComplete ? "bg-blue-600" : "bg-gray-300",
+                  ].join(" ")}
+              />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 export default function GradeNewPage() {
   const router = useRouter();
 
@@ -67,9 +120,10 @@ export default function GradeNewPage() {
     );
   }, [provider, profile, rows]);
 
-  const total = useMemo(() => {
-    return rows.reduce((sum, r) => sum + (typeof r.weight === "number" ? r.weight : 0), 0);
-  }, [rows]);
+  const total = useMemo(
+    () => rows.reduce((sum, r) => sum + (typeof r.weight === "number" ? r.weight : 0), 0),
+    [rows]
+  );
 
   const canSubmit = provider.length > 0 && Math.abs(total - 100) < 0.1 && !saving;
 
@@ -77,11 +131,9 @@ export default function GradeNewPage() {
   function addRow() {
     setRows((r) => [...r, { symbol: "", weight: "" }]);
   }
-
   function removeRow(i: number) {
     setRows((r) => r.filter((_, idx) => idx !== i));
   }
-
   function updateRow(i: number, key: keyof Holding, v: string) {
     setRows((r) =>
       r.map((row, idx) => {
@@ -180,6 +232,9 @@ export default function GradeNewPage() {
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
+      {/* Progress / flow */}
+      <Stepper current={1} />
+
       <h1 className="text-2xl font-bold">Get your grade</h1>
 
       {err && (
