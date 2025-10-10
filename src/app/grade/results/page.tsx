@@ -1,8 +1,61 @@
 // src/app/grade/results/page.tsx
 import Link from "next/link";
-import { sql } from "../../../lib/db"; // if this path fails, use "../../../../lib/db"
+import { sql } from "../../../lib/db"; // adjust if your path alias differs
 
 type SearchParams = { previewId?: string };
+
+// Server-rendered stepper (no hooks)
+function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
+  const steps = [
+    { n: 1, label: "Get Grade" },
+    { n: 2, label: "Review" },
+    { n: 3, label: "Purchase" },
+    { n: 4, label: "Report Sent" },
+  ] as const;
+
+  return (
+    <div className="w-full mb-6">
+      <ol className="flex items-center gap-3 text-sm">
+        {steps.map((s, idx) => {
+          const isActive = s.n === current;
+          const isComplete = s.n < current;
+          return (
+            <li key={s.n} className="flex items-center gap-3">
+              <div
+                className={[
+                  "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
+                  isActive
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : isComplete
+                    ? "border-blue-600 text-blue-600"
+                    : "border-gray-300 text-gray-600",
+                ].join(" ")}
+              >
+                {s.n}
+              </div>
+              <span
+                className={[
+                  "whitespace-nowrap",
+                  isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                ].join(" ")}
+              >
+                {s.label}
+              </span>
+              {idx < steps.length - 1 && (
+                <div
+                  className={[
+                    "mx-2 h-px w-10 md:w-16",
+                    isComplete ? "bg-blue-600" : "bg-gray-300",
+                  ].join(" ")}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
 
 export default async function ResultPage({
   searchParams,
@@ -14,6 +67,7 @@ export default async function ResultPage({
   if (!previewId) {
     return (
       <main className="mx-auto max-w-3xl p-6 space-y-4">
+        <Stepper current={2} />
         <h1 className="text-2xl font-bold">Your Grade</h1>
         <div className="rounded border p-4 bg-white">
           <p className="text-sm text-gray-700">
@@ -29,7 +83,7 @@ export default async function ResultPage({
     );
   }
 
-  // Works for uuid or bigint ids by casting to text
+  // Supports UUID or bigint ids by casting to text
   const r = await sql(
     `SELECT id, created_at, provider, provider_display, profile, "rows", grade_base, grade_adjusted
      FROM public.previews
@@ -42,6 +96,7 @@ export default async function ResultPage({
   if (!p) {
     return (
       <main className="mx-auto max-w-3xl p-6 space-y-4">
+        <Stepper current={2} />
         <h1 className="text-2xl font-bold">Your Grade</h1>
         <div className="rounded border p-4 bg-white">
           <p className="text-sm text-gray-700">
@@ -68,6 +123,8 @@ export default async function ResultPage({
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
+      <Stepper current={2} />
+
       <h1 className="text-2xl font-bold">Your Grade</h1>
 
       <div className="rounded-lg border p-6 space-y-3 bg-white">
