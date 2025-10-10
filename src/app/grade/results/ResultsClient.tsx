@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
-type PreviewRow = { symbol: string; weight: number };
+type PreviewRow = { symbol?: string; weight?: number | string };
 type Preview = {
   ok: boolean;
   provider?: string | null;
@@ -15,6 +15,60 @@ type Preview = {
   grade_base?: number | null;
   grade_adjusted?: number | null;
 };
+
+// ---- Simple horizontal stepper ----
+function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
+  // 1:Get Grade, 2:Review (this page), 3:Purchase, 4:Report Sent
+  const steps = [
+    { n: 1, label: "Get Grade" },
+    { n: 2, label: "Review" },
+    { n: 3, label: "Purchase" },
+    { n: 4, label: "Report Sent" },
+  ] as const;
+
+  return (
+    <div className="w-full">
+      <ol className="flex items-center gap-3 text-sm">
+        {steps.map((s, idx) => {
+          const isActive = s.n === current;
+          const isComplete = s.n < current;
+          return (
+            <li key={s.n} className="flex items-center gap-3">
+              <div
+                className={[
+                  "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
+                  isActive
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : isComplete
+                    ? "border-blue-600 text-blue-600"
+                    : "border-gray-300 text-gray-600",
+                ].join(" ")}
+              >
+                {s.n}
+              </div>
+              <span
+                className={[
+                  "whitespace-nowrap",
+                  isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                ].join(" ")}
+              >
+                {s.label}
+              </span>
+              {idx < steps.length - 1 && (
+                <div
+                  className={[
+                    "mx-2 h-px w-10 md:w-16",
+                    isComplete ? "bg-blue-600" : "bg-gray-300",
+                  ].join(" ")}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
 
 export default function ResultsClient() {
   const sp = useSearchParams();
@@ -63,10 +117,23 @@ export default function ResultsClient() {
     return preview?.provider_display || providerParam || preview?.provider || "—";
   }, [preview, providerParam]);
 
-  const rows = preview?.rows || [];
+  // Clean holdings: drop meta/invalid rows and coerce weights safely
+  const rows = useMemo(() => {
+    const raw = preview?.rows || [];
+    return raw
+      .filter((r) => r && typeof r.symbol === "string" && r.symbol.trim() !== "")
+      .map((r) => ({
+        symbol: (r.symbol as string).toUpperCase(),
+        weight: Number(r.weight ?? 0),
+      }))
+      .filter((r) => Number.isFinite(r.weight));
+  }, [preview]);
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
+      {/* Progression / flow */}
+      <Stepper current={2} />
+
       <h1 className="text-2xl font-bold">Your Grade</h1>
 
       <div className="rounded-lg border p-6 space-y-3 bg-white">
@@ -80,8 +147,7 @@ export default function ResultsClient() {
         </p>
         <p className="text-3xl">⭐ {gradeParam} / 5</p>
         <p className="text-sm text-gray-600">
-          This is a preview grade. The full PDF report (with model comparison
-          and market overlay) is sent after purchase.
+          This is a preview grade. The full PDF report (with model comparison and market overlay) is sent after purchase.
         </p>
       </div>
 
@@ -106,27 +172,40 @@ export default function ResultsClient() {
             {rows.map((r, i) => (
               <div key={`${r.symbol}-${i}`} className="grid grid-cols-12 py-2 text-sm">
                 <div className="col-span-8">{r.symbol}</div>
-                <div className="col-span-4 text-right">{Number(r.weight).toFixed(1)}</div>
+                <div className="col-span-4 text-right">
+                  {Number(r.weight).toFixed(1)}
+                </div>
               </div>
             ))}
           </div>
         </section>
       )}
 
-      <div className="flex gap-3">
-        <Link
-          href="/pricing"
-          className="inline-block rounded-lg border px-4 py-2 hover:bg-gray-50"
-        >
-          Buy report
-        </Link>
-        <Link
-          href="/grade/new"
-          className="inline-block rounded-lg border px-4 py-2 hover:bg-gray-50"
-        >
-          Edit inputs
-        </Link>
-      </div>
+      {/* Reasons to buy + primary CTA */}
+      <section className="rounded-lg border p-6 bg-white space-y-4">
+        <h2 className="text-lg font-semibold">Why buy the full report?</h2>
+        <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
+          <li>Personalized model comparison against your actual 401(k) menu</li>
+          <li>Allocation guidance with suggested increases/decreases by holding</li>
+          <li>Market cycle overlay using SPY 30/50/100/200-day SMAs</li>
+          <li>Clean, shareable PDF with your star grade and allocation map</li>
+          <li>Annual plan: three additional updates</li>
+        </ul>
+        <div className="flex gap-3">
+          <Link
+            href="/pricing"
+            className="inline-block rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
+          >
+            Buy report
+          </Link>
+          <Link
+            href="/grade/new"
+            className="inline-block rounded-lg border px-4 py-2 hover:bg-gray-50"
+          >
+            Edit inputs
+          </Link>
+        </div>
+      </section>
     </main>
   );
 }
