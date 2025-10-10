@@ -3,15 +3,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  PROVIDER_DISPLAY,
+  PROVIDER_TICKERS,
+  ProviderKey,
+  normalizeProviderKey,
+} from "@/lib/providerMeta";
 
 type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
 type Holding = { symbol: string; weight: number | "" };
 
+const STORAGE_KEY = "gy4k_form_v1";
+
 export default function GradeNewPage() {
   const router = useRouter();
 
-  // UI state
-  const [provider, setProvider] = useState<string>("");
+  const [provider, setProvider] = useState<ProviderKey>("fidelity");
   const [profile, setProfile] = useState<InvestorProfile>("Growth");
   const [rows, setRows] = useState<Holding[]>([
     { symbol: "FSKAX", weight: 40 },
@@ -20,14 +27,46 @@ export default function GradeNewPage() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Compute total (treat "" as 0)
+  // Load saved draft
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.provider) setProvider(normalizeProviderKey(parsed.provider));
+      if (parsed?.profile) setProfile(parsed.profile);
+      if (Array.isArray(parsed?.rows) && parsed.rows.length) {
+        setRows(
+          parsed.rows.map((r: any) => ({
+            symbol: String(r.symbol || "").toUpperCase(),
+            weight:
+              r.weight === "" || r.weight === null || Number.isNaN(Number(r.weight))
+                ? ""
+                : Number(r.weight),
+          }))
+        );
+      }
+    } catch {}
+  }, []);
+
+  // Save draft on change
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const payload = {
+      provider,
+      profile,
+      rows,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }, [provider, profile, rows]);
+
   const total = useMemo(() => {
     return rows.reduce((sum, r) => sum + (typeof r.weight === "number" ? r.weight : 0), 0);
   }, [rows]);
 
-  const canSubmit = provider.length > 0 && Math.abs(total - 100) < 0.1 && !saving;
+  const canSubmit = provider !== "other" ? Math.abs(total - 100) < 0.1 && !saving : Math.abs(total - 100) < 0.1 && !saving;
 
-  // helpers
   function addRow() {
     setRows((r) => [...r, { symbol: "", weight: "" }]);
   }
@@ -39,7 +78,6 @@ export default function GradeNewPage() {
       r.map((row, idx) => {
         if (idx !== i) return row;
         if (key === "weight") {
-          // Allow empty while typing; coerce to number only if non-empty
           const trimmed = v.trim();
           return { ...row, weight: trimmed === "" ? "" : Number(trimmed) };
         } else {
@@ -56,7 +94,8 @@ export default function GradeNewPage() {
   }
 
   async function savePreview(payload: {
-    provider: string;
+    provider: ProviderKey;
+    provider_display: string;
     profile: InvestorProfile;
     rows: { symbol: string; weight: number }[];
     grade_base: number;
@@ -69,7 +108,6 @@ export default function GradeNewPage() {
     });
     const data = await res.json();
     if (!res.ok || !data?.id) throw new Error(data?.error || "Failed to save preview");
-    // Persist only in the browser
     if (typeof window !== "undefined") {
       localStorage.setItem("gy4k_preview_id", data.id as string);
     }
@@ -81,27 +119,27 @@ export default function GradeNewPage() {
       setErr(null);
       setSaving(true);
 
-      // Normalize rows (drop empties, coerce numbers)
       const cleanRows = rows
         .filter((r) => r.symbol.trim() !== "" && r.weight !== "" && !Number.isNaN(Number(r.weight)))
         .map((r) => ({ symbol: r.symbol.trim().toUpperCase(), weight: Number(r.weight) }));
 
       const grade = computeGrade(profile, total);
-
       const previewId = await savePreview({
         provider,
+        provider_display: PROVIDER_DISPLAY[provider],
         profile,
         rows: cleanRows,
         grade_base: grade,
-        grade_adjusted: grade, // you’ll adjust with market overlay later
+        grade_adjusted: grade,
       });
 
       const qs = new URLSearchParams({
-        provider,
+        provider: PROVIDER_DISPLAY[provider],
         profile,
         grade: grade.toFixed(1),
         previewId,
       });
+      // Keep draft so they can edit later
       router.push(`/grade/result?${qs.toString()}`);
     } catch (e: any) {
       setErr(e?.message || "Could not save your grade. Please try again.");
@@ -110,10 +148,7 @@ export default function GradeNewPage() {
     }
   }
 
-  // If you had a client-side crash earlier from SSR/CSR, this guard helps ensure it's client-only
-  useEffect(() => {
-    // no-op: ensures we're rendering fully on client
-  }, []);
+  const providerList = PROVIDER_TICKERS[provider];
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
@@ -126,9 +161,8 @@ export default function GradeNewPage() {
         <select
           className="w-full border rounded-md p-2"
           value={provider}
-          onChange={(e) => setProvider(e.target.value)}
+          onChange={(e) => setProvider(e.target.value as ProviderKey)}
         >
-          <option value="">Choose…</option>
           <option value="fidelity">Fidelity</option>
           <option value="vanguard">Vanguard</option>
           <option value="schwab">Charles Schwab</option>
@@ -155,6 +189,40 @@ export default function GradeNewPage() {
 
       <section className="space-y-4">
         <div className="text-sm font-medium">3) Enter your current holdings</div>
+
+        {/* Provider tickers helper (optional) */}
+        {providerList.length > 0 && (
+          <div className="rounded-md border p-3 text-sm">
+            <div className="font-medium mb-1">
+              {PROVIDER_DISPLAY[provider]} popular tickers
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {providerList.slice(0, 30).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className="rounded border px-2 py-1 hover:bg-gray-50"
+                  title={`Insert ${t}`}
+                  onClick={() =>
+                    setRows((r) => {
+                      // Add if not present; else do nothing
+                      if (r.some((row) => row.symbol === t)) return r;
+                      return [...r, { symbol: t, weight: "" }];
+                    })
+                  }
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            {providerList.length > 30 && (
+              <p className="text-xs text-gray-500 mt-2">
+                Showing 30; you can still type others manually.
+              </p>
+            )}
+          </div>
+        )}
+
         {rows.map((row, i) => (
           <div key={i} className="grid grid-cols-12 gap-3">
             <input
@@ -180,6 +248,7 @@ export default function GradeNewPage() {
             </button>
           </div>
         ))}
+
         <div className="flex items-center justify-between">
           <button
             type="button"
