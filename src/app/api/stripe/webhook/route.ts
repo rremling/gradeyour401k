@@ -1,101 +1,100 @@
 // src/app/api/stripe/webhook/route.ts
-import { NextResponse } from "next/server";
-import Stripe from "stripe";
-import { sql } from "@/lib/db";
+import 'server-only';
+import Stripe from 'stripe';
+import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
+import { sql } from '@/lib/db'; // if your alias isn't set, change to: "../../../../lib/db"
 
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-// Important: DO NOT call req.json(). Stripe needs the raw body.
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY!;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET!;
+
+const stripe = new Stripe(STRIPE_SECRET_KEY, {
+  apiVersion: '2024-06-20',
+});
+
+// Simple health check (also helps Stripe dashboard sanity checks)
+export async function GET() {
+  return NextResponse.json({ ok: true, at: 'webhook', method: 'GET' });
+}
+
 export async function POST(req: Request) {
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-    apiVersion: "2024-06-20",
-  });
-
-  const sig = req.headers.get("stripe-signature");
-  const whSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!sig || !whSecret) {
-    console.error("[webhook] missing signature or secret");
-    return NextResponse.json({ received: true }, { status: 200 });
+  // 1) Read raw body for signature verification
+  const sig = headers().get('stripe-signature');
+  if (!sig) {
+    return NextResponse.json({ error: 'Missing stripe-signature' }, { status: 400 });
   }
 
   let event: Stripe.Event;
+  const raw = await req.text();
+
   try {
-    const rawBody = await req.text();
-    event = stripe.webhooks.constructEvent(rawBody, sig, whSecret);
+    event = stripe.webhooks.constructEvent(raw, sig, STRIPE_WEBHOOK_SECRET);
   } catch (err: any) {
-    console.error("[webhook] constructEvent failed:", err?.message);
-    return NextResponse.json({ received: true }, { status: 200 });
+    console.error('[webhook] signature verify failed:', err?.message);
+    return NextResponse.json({ error: `Signature error: ${err?.message}` }, { status: 400 });
   }
 
-  try {
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.Checkout.Session;
+  // 2) Handle only what we need
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object as Stripe.Checkout.Session;
 
-      // Pull common fields
-      const session_id = session.id;
-      const payment_intent = typeof session.payment_intent === "string"
-        ? session.payment_intent
-        : (session.payment_intent as Stripe.PaymentIntent | null)?.id || null;
-      const email =
-        session.customer_details?.email ||
-        (typeof session.customer === "string" ? null : session.customer?.email) ||
-        session.metadata?.email ||
-        null;
-      const amount_total = session.amount_total ?? null; // in cents
-      const currency = session.currency ?? null;
-      const mode = session.mode ?? null; // 'payment' | 'subscription'
-      const plan = session.metadata?.plan || null; // you set this when creating the session
-      const preview_id = session.metadata?.previewId || null;
+    // Metadata we set when creating the Checkout Session
+    const previewId = session.metadata?.previewId ?? null;
+    const planKey = session.metadata?.planKey ?? null;
 
-      console.log("[webhook] session completed:", {
-        session_id,
-        email,
-        amount_total,
-        currency,
-        mode,
-        plan,
-        preview_id,
+    // Customer email from Checkout
+    const email =
+      session.customer_details?.email ??
+      // fallback if you enabled it
+      (session as any).customer_email ??
+      null;
+
+    try {
+      // 3) Persist order using stripe_session_id (Option B)
+      // Make sure your DB has:
+      // - column: stripe_session_id TEXT UNIQUE
+      // - columns: email TEXT, plan TEXT, preview_id TEXT, status TEXT, created_at TIMESTAMPTZ DEFAULT now()
+      await sql/* sql */`
+        INSERT INTO public.orders (stripe_session_id, email, plan, preview_id, status)
+        VALUES (${session.id}, ${email}, ${planKey}, ${previewId}, 'paid')
+        ON CONFLICT (stripe_session_id) DO UPDATE
+        SET email = EXCLUDED.email,
+            plan = EXCLUDED.plan,
+            preview_id = EXCLUDED.preview_id,
+            status = EXCLUDED.status
+      `;
+
+      // 4) (Optional) Fire-and-forget report generation/email.
+      // We do this *after* returning 200 to Stripe in case it’s slow.
+      // If your generate endpoint requires auth, add the header here.
+      // Don’t block the webhook; run in background.
+      queueMicrotask(async () => {
+        try {
+          await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ''}/api/report/generate-and-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              previewId,
+              plan: planKey,
+              sessionId: session.id,
+            }),
+          });
+        } catch (e) {
+          console.error('[webhook] background generate failed:', e);
+        }
       });
-
-      // Insert order
-      try {
-        await sql(
-          `INSERT INTO public.orders
-             (email, session_id, payment_intent, amount, currency, mode, plan, preview_id, raw)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-           ON CONFLICT (session_id) DO NOTHING`,
-          [
-            email,
-            session_id,
-            payment_intent,
-            amount_total,
-            currency,
-            mode,
-            plan,
-            preview_id,
-            event as any, // raw JSON
-          ]
-        );
-        console.log("[webhook] order saved OK");
-      } catch (dbErr: any) {
-        console.error("[webhook] saveOrder failed:", dbErr);
-      }
-
-      // You can trigger your generate-and-email here if desired
-      // await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/report/generate-and-email`, { ... })
-    } else {
-      // Other events are ignored but acknowledged
-      // console.log("[webhook] ignored:", event.type);
+    } catch (dbErr: any) {
+      console.error('[webhook] saveOrder failed:', dbErr);
+      // Still return 200 so Stripe doesn't retry forever if this was a one-off.
+      // If you want Stripe to retry on DB failure, return 500 instead.
+      return NextResponse.json({ ok: true, saved: false }, { status: 200 });
     }
-  } catch (err: any) {
-    console.error("[webhook] handler error:", err?.message);
   }
 
-  // Always 200 so Stripe stops retrying
-  return NextResponse.json({ received: true }, { status: 200 });
-}
-
-// Stripe sends GET pings sometimes; OK to 200 them
-export async function GET() {
-  return NextResponse.json({ ok: true, method: "GET" });
+  // For other events, just acknowledge
+  return NextResponse.json({ ok: true });
 }
