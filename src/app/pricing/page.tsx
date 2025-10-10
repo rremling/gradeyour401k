@@ -1,10 +1,21 @@
+// src/app/grade/new/page.tsx
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  PROVIDER_DISPLAY,
+  PROVIDER_TICKERS,
+  ProviderKey,
+} from "@/lib/providerMeta";
 
-// Progress bar at top (Step 3 active)
-function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
+type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
+type Holding = { symbol: string; weight: number | "" };
+
+const FORM_STORAGE = "gy4k_form_v1";
+
+// ---- Stepper (1:Get Grade, 2:Review, 3:Purchase, 4:Report Sent) ----
+function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
     { n: 2, label: "Review" },
@@ -13,7 +24,7 @@ function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
   ] as const;
 
   return (
-    <div className="w-full mb-6">
+    <div className="w-full">
       <ol className="flex items-center gap-3 text-sm">
         {steps.map((s, idx) => {
           const isActive = s.n === current;
@@ -46,7 +57,7 @@ function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
                     "mx-2 h-px w-10 md:w-16",
                     isComplete ? "bg-blue-600" : "bg-gray-300",
                   ].join(" ")}
-                />
+              />
               )}
             </li>
           );
@@ -56,137 +67,306 @@ function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-export default function PricingPage() {
-  const [promoCode, setPromoCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+export default function GradeNewPage() {
+  const router = useRouter();
 
-  async function startCheckout(plan: "onetime" | "annual") {
-    setError(null);
+  // Core form state
+  const [provider, setProvider] = useState<ProviderKey>("fidelity");
+  const [profile, setProfile] = useState<InvestorProfile>("Growth");
+  const [rows, setRows] = useState<Holding[]>([
+    { symbol: "FSKAX", weight: 40 },
+    { symbol: "FXNAX", weight: 20 },
+  ]);
+
+  // UI helpers
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Hidden dropdown state
+  const [showAddList, setShowAddList] = useState(false);
+  const [selectedTicker, setSelectedTicker] = useState<string>("");
+
+  // Load draft once
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     try {
-      const res = await fetch("/api/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          plan,
-          promoCode: promoCode.trim().toUpperCase(),
-        }),
+      const raw = localStorage.getItem(FORM_STORAGE);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.provider) setProvider(parsed.provider as ProviderKey);
+      if (parsed?.profile) setProfile(parsed.profile as InvestorProfile);
+      if (Array.isArray(parsed?.rows) && parsed.rows.length) {
+        setRows(
+          parsed.rows.map((r: any) => ({
+            symbol: String(r.symbol || "").toUpperCase(),
+            weight:
+              r.weight === "" || r.weight === null || Number.isNaN(Number(r.weight))
+                ? ""
+                : Number(r.weight),
+          }))
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Persist draft on change
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(
+      FORM_STORAGE,
+      JSON.stringify({ provider, profile, rows })
+    );
+  }, [provider, profile, rows]);
+
+  const total = useMemo(
+    () => rows.reduce((sum, r) => sum + (typeof r.weight === "number" ? r.weight : 0), 0),
+    [rows]
+  );
+
+  const canSubmit = provider.length > 0 && Math.abs(total - 100) < 0.1 && !saving;
+
+  // Row ops
+  function addRow() {
+    setRows((r) => [...r, { symbol: "", weight: "" }]);
+  }
+  function removeRow(i: number) {
+    setRows((r) => r.filter((_, idx) => idx !== i));
+  }
+  function updateRow(i: number, key: keyof Holding, v: string) {
+    setRows((r) =>
+      r.map((row, idx) => {
+        if (idx !== i) return row;
+        if (key === "weight") {
+          const trimmed = v.trim();
+          return { ...row, weight: trimmed === "" ? "" : Number(trimmed) };
+        }
+        return { ...row, symbol: v.toUpperCase() };
+      })
+    );
+  }
+
+  // Add from hidden dropdown
+  function addSelectedTicker() {
+    const t = selectedTicker.trim().toUpperCase();
+    if (!t) return;
+    setRows((r) => {
+      if (r.some((row) => row.symbol === t)) return r;
+      return [...r, { symbol: t, weight: "" }];
+    });
+  }
+
+  // Simple grade until final model logic
+  function computeGrade(profileInput: InvestorProfile, totalWeight: number): number {
+    const base =
+      profileInput === "Aggressive Growth" ? 4.5 : profileInput === "Balanced" ? 3.8 : 4.1;
+    const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100);
+    return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
+  }
+
+  async function savePreview(payload: {
+    provider: ProviderKey;
+    provider_display: string;
+    profile: InvestorProfile;
+    rows: { symbol: string; weight: number }[];
+    grade_base: number;
+    grade_adjusted: number;
+  }) {
+    const res = await fetch("/api/preview/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.id) throw new Error(data?.error || "Failed to save preview");
+    if (typeof window !== "undefined") {
+      localStorage.setItem("gy4k_preview_id", data.id as string);
+    }
+    return data.id as string;
+  }
+
+  async function onSubmit() {
+    try {
+      setErr(null);
+      setSaving(true);
+
+      const cleanRows = rows
+        .filter((r) => {
+          const sym = r.symbol?.trim() || "";
+          const wt = r.weight;
+          const hasWeight = wt !== "" && !Number.isNaN(Number(wt));
+          return sym !== "" && hasWeight;
+        })
+        .map((r) => ({
+          symbol: r.symbol.trim().toUpperCase(),
+          weight: Number(r.weight),
+        }));
+
+      const grade = computeGrade(profile, total);
+
+      const previewId = await savePreview({
+        provider,
+        provider_display: PROVIDER_DISPLAY[provider],
+        profile,
+        rows: cleanRows,
+        grade_base: grade,
+        grade_adjusted: grade, // later: market overlay
       });
-      const data = await res.json();
-      if (!res.ok || !data?.url) throw new Error(data?.error || "Checkout failed");
-      window.location.href = data.url;
+
+      const qs = new URLSearchParams({
+        provider: PROVIDER_DISPLAY[provider],
+        profile,
+        grade: grade.toFixed(1),
+        previewId,
+      });
+      router.push(`/grade/result?${qs.toString()}`);
     } catch (e: any) {
-      setError(e?.message || "Checkout failed");
+      setErr(e?.message || "Could not save your grade. Please try again.");
+    } finally {
+      setSaving(false);
     }
   }
 
+  const providerTickers = PROVIDER_TICKERS[provider];
+
   return (
-    <main className="mx-auto max-w-5xl p-6 space-y-8">
-      <Stepper current={3} />
+    <main className="mx-auto max-w-3xl p-6 space-y-6">
+      {/* Progress / flow */}
+      <Stepper current={1} />
 
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold">Choose your report option</h1>
-        <p className="text-gray-600">
-          Get your personalized 401(k) grade and detailed improvement guidance.
-        </p>
-      </div>
+      <h1 className="text-2xl font-bold">Get your grade</h1>
 
-      {error && (
-        <div className="rounded-md border border-red-300 bg-red-50 p-3 text-red-700 text-sm">
-          {error}
+      {err && (
+        <div className="rounded border border-red-200 bg-red-50 p-3 text-red-700 text-sm">
+          {err}
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* One-time Report */}
-        <div className="border rounded-lg bg-white p-6 flex flex-col justify-between">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">One-time Report</h2>
-              <span className="text-lg font-bold text-blue-600">$79</span>
-            </div>
-            <ul className="list-disc list-inside text-gray-700 text-sm space-y-2">
-              <li>Personalized 401(k) score and ranking</li>
-              <li>Performance and diversification analysis</li>
-              <li>Tax-efficiency & fee evaluation</li>
-              <li>PDF report delivered instantly via email</li>
-            </ul>
-          </div>
-          <div className="pt-4">
-            <button
-              onClick={() => startCheckout("onetime")}
-              className="w-full rounded-lg bg-blue-600 text-white py-2 hover:bg-blue-700 transition"
-            >
-              Buy One-Time Report
-            </button>
-          </div>
-        </div>
+      <section className="space-y-2">
+        <label className="text-sm font-medium">1) Select your provider</label>
+        <select
+          className="w-full border rounded-md p-2"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value as ProviderKey)}
+        >
+          <option value="fidelity">Fidelity</option>
+          <option value="vanguard">Vanguard</option>
+          <option value="schwab">Charles Schwab</option>
+          <option value="invesco">Invesco</option>
+          <option value="blackrock">BlackRock / iShares</option>
+          <option value="statestreet">State Street / SPDR</option>
+          <option value="voya">Voya</option>
+          <option value="other">Other provider</option>
+        </select>
+      </section>
 
-        {/* Annual Plan */}
-        <div className="border rounded-lg bg-white p-6 flex flex-col justify-between">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Annual Plan</h2>
-              <span className="text-lg font-bold text-blue-600">$199/yr</span>
-            </div>
-            <ul className="list-disc list-inside text-gray-700 text-sm space-y-2">
-              <li>Everything in One-time Report</li>
-              <li>Quarterly portfolio re-grade updates</li>
-              <li>Market cycle trend overlay</li>
-              <li>Priority email support</li>
-            </ul>
-          </div>
-          <div className="pt-4">
-            <button
-              onClick={() => startCheckout("annual")}
-              className="w-full rounded-lg bg-blue-600 text-white py-2 hover:bg-blue-700 transition"
-            >
-              Subscribe to Annual Plan
-            </button>
-          </div>
-        </div>
-      </div>
+      <section className="space-y-2">
+        <label className="text-sm font-medium">2) Your investor profile</label>
+        <select
+          className="w-full border rounded-md p-2"
+          value={profile}
+          onChange={(e) => setProfile(e.target.value as InvestorProfile)}
+        >
+          <option value="Aggressive Growth">Aggressive Growth</option>
+          <option value="Growth">Growth</option>
+          <option value="Balanced">Balanced</option>
+        </select>
+      </section>
 
-      {/* Promo code section */}
-      <div className="max-w-md mx-auto text-center space-y-3 pt-8">
-        <label className="block text-sm font-medium text-gray-700">
-          Have a promo code?
-        </label>
-        <div className="flex justify-center gap-2">
-          <input
-            type="text"
-            placeholder="PROMO2025"
-            value={promoCode}
-            onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
-            className="border rounded-md p-2 text-center w-40 uppercase"
-          />
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium">3) Enter your current holdings</div>
+          {/* Toggleable provider list */}
           <button
-            onClick={() => setPromoCode(promoCode.trim().toUpperCase())}
-            className="border rounded-md px-3 py-2 text-sm hover:bg-gray-50"
+            type="button"
+            className="text-sm underline hover:no-underline"
+            onClick={() => setShowAddList((s) => !s)}
           >
-            Apply
+            {showAddList ? "Hide provider list" : `Add from ${PROVIDER_DISPLAY[provider]} list`}
           </button>
         </div>
-        <p className="text-xs text-gray-500">
-          Discounts automatically apply at checkout.
-        </p>
-      </div>
 
-      {/* RIA agreement and get grade link */}
-      <div className="text-center text-sm text-gray-600 pt-6">
-        By purchasing, you agree to our{" "}
-        <Link href="/legal/ria" className="underline text-blue-600">
-          RIA Agreement
-        </Link>{" "}
-        and acknowledge this analysis is for informational purposes only.
-      </div>
+        {/* Hidden dropdown when not in use */}
+        {showAddList && providerTickers.length > 0 && (
+          <div className="rounded-md border p-3 flex gap-2 items-center bg-white">
+            <select
+              className="border rounded-md p-2 w-full md:w-80"
+              value={selectedTicker}
+              onChange={(e) => setSelectedTicker(e.target.value)}
+            >
+              <option value="">Select a ticker</option>
+              {providerTickers.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="border rounded-md px-3 py-2 hover:bg-gray-50"
+              onClick={addSelectedTicker}
+              disabled={!selectedTicker}
+            >
+              Add
+            </button>
+          </div>
+        )}
 
-      <div className="text-center pt-4">
-        <Link
-          href="/grade/new"
-          className="text-blue-600 underline hover:no-underline"
+        {rows.map((row, i) => (
+          <div key={i} className="grid grid-cols-12 gap-3">
+            <input
+              className="col-span-7 border rounded-md p-2"
+              placeholder="Symbol (e.g., FSKAX)"
+              value={row.symbol}
+              onChange={(e) => updateRow(i, "symbol", e.target.value)}
+            />
+            <input
+              type="number"
+              inputMode="decimal"
+              className="col-span-3 border rounded-md p-2"
+              placeholder="Weight %"
+              value={row.weight}
+              onChange={(e) => updateRow(i, "weight", e.target.value)}
+            />
+            <button
+              type="button"
+              className="col-span-2 border rounded-md px-3 py-2 hover:bg-gray-50"
+              onClick={() => removeRow(i)}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={addRow}
+            className="border rounded-md px-3 py-2 hover:bg-gray-50"
+          >
+            Add holding
+          </button>
+          <div className="text-sm text-gray-600">Total: {total.toFixed(1)}%</div>
+        </div>
+      </section>
+
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          className={`rounded-lg px-5 py-3 text-white ${
+            canSubmit ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-400 cursor-not-allowed"
+          }`}
         >
-          Haven’t received your grade yet? Get your grade first →
-        </Link>
+          {saving ? "Saving…" : "Preview grade"}
+        </button>
+        {!canSubmit && (
+          <p className="mt-2 text-xs text-gray-500">
+            Choose a provider and make sure weights sum to 100%.
+          </p>
+        )}
       </div>
     </main>
   );
