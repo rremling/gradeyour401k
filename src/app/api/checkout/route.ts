@@ -8,11 +8,26 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!;
 const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
-const DOMAIN =
-  process.env.NEXT_PUBLIC_BASE_URL ||
-  process.env.VERCEL_URL?.startsWith("http")
-    ? process.env.VERCEL_URL
-    : `https://${process.env.VERCEL_URL || "www.gradeyour401k.com"}`;
+
+/** Get a fully-qualified base URL with scheme */
+function getBaseUrl(req: Request): string {
+  // Preferred: explicit base URL set in env, must include scheme
+  const explicit = process.env.NEXT_PUBLIC_BASE_URL;
+  if (explicit && /^https?:\/\//i.test(explicit)) return explicit.replace(/\/+$/, "");
+
+  // Vercel provides a host without scheme; add https://
+  const vercelHost = process.env.VERCEL_URL; // e.g. "www.gradeyour401k.com"
+  if (vercelHost) return `https://${vercelHost.replace(/\/+$/, "")}`;
+
+  // Fallback to request origin (works locally)
+  try {
+    const u = new URL(req.url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    // Last resort
+    return "http://localhost:3000";
+  }
+}
 
 export async function POST(req: Request) {
   try {
@@ -22,10 +37,7 @@ export async function POST(req: Request) {
     const promotionCodeId = body.promotionCodeId as string | undefined;
 
     if (!planKey || !previewId) {
-      return NextResponse.json(
-        { error: "Missing planKey or previewId" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing planKey or previewId" }, { status: 400 });
     }
 
     const price = planKey === "annual" ? PRICE_ANNUAL : PRICE_ONE_TIME;
@@ -36,36 +48,25 @@ export async function POST(req: Request) {
       );
     }
 
+    const base = getBaseUrl(req); // <- always includes scheme
     const params: Stripe.Checkout.SessionCreateParams = {
       mode: planKey === "annual" ? "subscription" : "payment",
       line_items: [{ price, quantity: 1 }],
-      success_url: `${DOMAIN}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${DOMAIN}/pricing`,
-      // REQUIRED: include metadata that webhook will persist
-      metadata: {
-        planKey,
-        previewId,
-      },
-      // Optional promo code (use either allow_promotion_codes OR discounts)
+      success_url: `${base}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${base}/pricing`,
+      metadata: { planKey, previewId },
       ...(promotionCodeId
         ? { discounts: [{ promotion_code: promotionCodeId }] }
         : { allow_promotion_codes: true }),
-      // Make sure we get the email in the session object
-      customer_creation:
-        planKey === "annual" ? undefined : "always" /* only in payment mode */,
+      // Only permitted in payment mode:
+      ...(planKey === "one_time" ? { customer_creation: "always" } : {}),
     };
-
-    // Note: Stripe restricts `customer_creation` to payment mode.
-    if (planKey === "annual") {
-      // remove any accidental customer_creation if set
-      // (not needed here since we conditionally set above)
-    }
 
     const session = await stripe.checkout.sessions.create(params);
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
     return NextResponse.json(
-      { error: `Checkout failed: ${err.message || "unknown"}` },
+      { error: `Checkout failed: ${err?.message || "unknown"}` },
       { status: 500 }
     );
   }
