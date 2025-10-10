@@ -5,9 +5,11 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
-type Holding = { symbol: string; weight: number };
 
-// -------- Provider display names (stored in DB/PDF) --------
+// Store weight as STRING for smooth typing (empty allowed)
+type Holding = { symbol: string; weight: string };
+
+// -------- Provider display names --------
 const PROVIDER_DISPLAY: Record<string, string> = {
   fidelity: "Fidelity",
   vanguard: "Vanguard",
@@ -19,7 +21,7 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   other: "Other",
 };
 
-// -------- Provider ticker catalogs (curate as needed) --------
+// -------- Provider ticker catalogs --------
 const PROVIDER_FUNDS: Record<string, string[]> = {
   fidelity: [
     "FFGCX","FSELX","FSPHX","FBIOX","FSDAX","FSPTX","FSAVX","FPHAX","FEMKX","FCOM",
@@ -61,7 +63,7 @@ const PROVIDER_FUNDS: Record<string, string[]> = {
   other: [],
 };
 
-// -------- Stepper (progress bar) --------
+// -------- Stepper --------
 function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -114,15 +116,23 @@ function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-// -------- Utility: simple grade + reasons --------
+// -------- Grade + reasons --------
 function computeGradeAndReasons(
   provider: string,
   profile: InvestorProfile,
   rows: Holding[]
 ) {
-  const total = rows.reduce((s, r) => s + (Number(r.weight) || 0), 0);
+  // parse weights safely
+  const weights = rows.map((r) => {
+    const n = parseFloat((r.weight || "").trim());
+    return Number.isFinite(n) ? n : 0;
+  });
+
+  const total = weights.reduce((s, n) => s + n, 0);
   const catalog = new Set((PROVIDER_FUNDS[provider] || []).map((t) => t.toUpperCase()));
-  const outside = rows.filter((r) => r.symbol && !catalog.has(r.symbol.toUpperCase()));
+  const outside = rows.filter(
+    (r) => r.symbol && !catalog.has(r.symbol.toUpperCase())
+  );
   const hasOutside = outside.length > 0;
 
   // base by profile
@@ -137,7 +147,7 @@ function computeGradeAndReasons(
     reasons.push(`Weights sum to ${total.toFixed(1)}% (target 100%).`);
   }
 
-  // penalty: holdings outside selected provider catalog (only advisory—401k menus vary)
+  // penalty: holdings outside selected provider catalog (advisory)
   if (hasOutside && provider !== "other") {
     base -= 0.3;
     reasons.push(
@@ -146,7 +156,7 @@ function computeGradeAndReasons(
   }
 
   // penalty: concentration (largest position >60%)
-  const maxWt = Math.max(0, ...rows.map((r) => Number(r.weight) || 0));
+  const maxWt = Math.max(0, ...weights);
   if (maxWt > 60) {
     base -= 0.2;
     reasons.push(`High concentration: top position is ${maxWt.toFixed(1)}%.`);
@@ -164,37 +174,40 @@ export default function NewGradePage() {
   const [provider, setProvider] = useState("fidelity");
   const [profile, setProfile] = useState<InvestorProfile>("Growth");
   const [rows, setRows] = useState<Holding[]>([
-    { symbol: "FSKAX", weight: 60 },
-    { symbol: "FXNAX", weight: 40 },
+    { symbol: "FSKAX", weight: "60" },
+    { symbol: "FXNAX", weight: "40" },
   ]);
 
   // Add-from-list UI
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
   const providerList = useMemo(
-    () => (PROVIDER_FUNDS[provider] || []).filter((t) =>
-      t.toUpperCase().includes(catalogSearch.toUpperCase())
-    ),
+    () =>
+      (PROVIDER_FUNDS[provider] || []).filter((t) =>
+        t.toUpperCase().includes(catalogSearch.toUpperCase())
+      ),
     [provider, catalogSearch]
   );
   const [selectedFromList, setSelectedFromList] = useState<string>("");
 
   // Totals / validation
-  const total = useMemo(
-    () => rows.reduce((s, r) => s + (Number(r.weight) || 0), 0),
-    [rows]
-  );
+  const total = useMemo(() => {
+    return rows.reduce((s, r) => {
+      const n = parseFloat((r.weight || "").trim());
+      return s + (Number.isFinite(n) ? n : 0);
+    }, 0);
+  }, [rows]);
   const canSubmit = provider && Math.abs(total - 100) < 0.1;
 
   // -------- Row helpers --------
   function addRow() {
-    setRows((r) => [...r, { symbol: "", weight: 0 }]);
+    setRows((r) => [...r, { symbol: "", weight: "" }]);
   }
   function addSymbol(sym: string) {
     const symbol = sym.toUpperCase().trim();
     if (!symbol) return;
     if (rows.some((r) => r.symbol.toUpperCase() === symbol)) return;
-    setRows((r) => [...r, { symbol, weight: 0 }]);
+    setRows((r) => [...r, { symbol, weight: "" }]);
   }
   function removeRow(i: number) {
     setRows((r) => r.filter((_, idx) => idx !== i));
@@ -205,7 +218,7 @@ export default function NewGradePage() {
         idx === i
           ? {
               ...row,
-              [key]: key === "weight" ? Number(v) : v.toUpperCase(),
+              [key]: key === "symbol" ? v.toUpperCase() : v, // keep weight as raw string
             }
           : row
       )
@@ -254,7 +267,7 @@ export default function NewGradePage() {
         throw new Error(data?.error || "Could not save preview");
       }
 
-      const id = String(data.id); // may be UUID
+      const id = String(data.id);
       if (typeof window !== "undefined") {
         localStorage.setItem("gy4k_preview_id", id);
       }
@@ -268,13 +281,16 @@ export default function NewGradePage() {
 
   async function onPreviewClick() {
     const cleanRows = rows
-      .map((r) => ({
-        symbol: String(r.symbol || "").toUpperCase().trim(),
-        weight: Number(r.weight),
-      }))
-      .filter((r) => r.symbol && !Number.isNaN(r.weight));
+      .map((r) => {
+        const n = parseFloat((r.weight || "").trim());
+        return {
+          symbol: String(r.symbol || "").toUpperCase().trim(),
+          weight: Number.isFinite(n) ? n : 0,
+        };
+      })
+      .filter((r) => r.symbol);
 
-    // For now adjusted == score; your paid model can overlay market regime, etc.
+    // For now adjusted == score; paid model can overlay market regime, etc.
     await savePreviewAndGo({
       provider,
       profile,
@@ -408,12 +424,18 @@ export default function NewGradePage() {
                 onChange={(e) => updateRow(i, "symbol", e.target.value)}
               />
               <input
-                type="number"
-                step="0.1"
+                type="text"
+                inputMode="decimal"
                 className="col-span-3 border rounded-md p-2"
                 placeholder="Weight %"
-                value={Number.isFinite(row.weight) ? row.weight : ""}
-                onChange={(e) => updateRow(i, "weight", e.target.value)}
+                value={row.weight}
+                onChange={(e) => {
+                  // Allow only digits, dot, empty
+                  const v = e.target.value;
+                  if (/^\d*\.?\d*$/.test(v) || v === "") {
+                    updateRow(i, "weight", v);
+                  }
+                }}
               />
               <button
                 type="button"
@@ -439,18 +461,22 @@ export default function NewGradePage() {
       {/* Current holdings summary */}
       <section className="rounded-lg border p-4 bg-white">
         <h2 className="font-semibold">Current Holdings</h2>
-        {rows.filter(r => r.symbol.trim() !== "").length === 0 ? (
+        {rows.filter((r) => r.symbol.trim() !== "").length === 0 ? (
           <p className="text-sm text-gray-600 mt-2">No holdings entered yet.</p>
         ) : (
           <ul className="mt-2 text-sm text-gray-800 space-y-1">
             {rows
-              .filter(r => r.symbol.trim() !== "")
-              .map((r, idx) => (
-                <li key={`${r.symbol}-${idx}`} className="flex justify-between">
-                  <span className="font-mono">{r.symbol.toUpperCase()}</span>
-                  <span>{(Number(r.weight) || 0).toFixed(1)}%</span>
-                </li>
-              ))}
+              .filter((r) => r.symbol.trim() !== "")
+              .map((r, idx) => {
+                const n = parseFloat((r.weight || "").trim());
+                const wt = Number.isFinite(n) ? n : 0;
+                return (
+                  <li key={`${r.symbol}-${idx}`} className="flex justify-between">
+                    <span className="font-mono">{r.symbol.toUpperCase()}</span>
+                    <span>{wt.toFixed(1)}%</span>
+                  </li>
+                );
+              })}
           </ul>
         )}
       </section>
@@ -517,9 +543,7 @@ export default function NewGradePage() {
             Choose a provider and make sure weights sum to 100%.
           </p>
         )}
-        {saveError && (
-          <p className="mt-2 text-sm text-red-600">{saveError}</p>
-        )}
+        {saveError && <p className="mt-2 text-sm text-red-600">{saveError}</p>}
       </div>
     </main>
   );
