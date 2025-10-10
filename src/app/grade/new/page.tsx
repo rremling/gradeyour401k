@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
-type Holding = { symbol: string; weight: number | "" };
+type Holding = { symbol: string; weight: number };
 
 // -------- Provider display names (stored in DB/PDF) --------
 const PROVIDER_DISPLAY: Record<string, string> = {
@@ -19,7 +19,7 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   other: "Other",
 };
 
-// -------- Provider ticker catalogs --------
+// -------- Provider ticker catalogs (trim/add as you like) --------
 const PROVIDER_FUNDS: Record<string, string[]> = {
   fidelity: [
     "FFGCX","FSELX","FSPHX","FBIOX","FSDAX","FSPTX","FSAVX","FPHAX","FEMKX","FCOM",
@@ -61,7 +61,7 @@ const PROVIDER_FUNDS: Record<string, string[]> = {
   other: [],
 };
 
-// -------- UI: top stepper --------
+// -------- UI: top stepper (client-safe, no hooks) --------
 function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -129,31 +129,30 @@ export default function NewGradePage() {
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState("");
   const providerList = useMemo(
-    () =>
-      (PROVIDER_FUNDS[provider] || []).filter((t) =>
-        t.toUpperCase().includes(catalogSearch.toUpperCase())
-      ),
+    () => (PROVIDER_FUNDS[provider] || []).filter((t) =>
+      t.toUpperCase().includes(catalogSearch.toUpperCase())
+    ),
     [provider, catalogSearch]
   );
   const [selectedFromList, setSelectedFromList] = useState<string>("");
 
-  // Totals / validation (treat empty weight as 0)
+  // Totals / validation
   const total = useMemo(
-    () =>
-      rows.reduce((s, r) => s + (r.weight === "" ? 0 : (Number(r.weight) || 0)), 0),
+    () => rows.reduce((s, r) => s + (Number(r.weight) || 0), 0),
     [rows]
   );
   const canSubmit = provider && Math.abs(total - 100) < 0.1;
 
   // -------- Row helpers --------
   function addRow() {
-    setRows((r) => [...r, { symbol: "", weight: "" }]);
+    setRows((r) => [...r, { symbol: "", weight: 0 }]);
   }
   function addSymbol(sym: string) {
     const symbol = sym.toUpperCase().trim();
     if (!symbol) return;
-    if (rows.some((r) => r.symbol.toUpperCase() === symbol)) return;
-    setRows((r) => [...r, { symbol, weight: "" }]);
+    // Avoid duplicates: if exists, just focus user on editing that row weight
+    if (rows.some((r) => r.symbol === symbol)) return;
+    setRows((r) => [...r, { symbol, weight: 0 }]);
   }
   function removeRow(i: number) {
     setRows((r) => r.filter((_, idx) => idx !== i));
@@ -164,17 +163,14 @@ export default function NewGradePage() {
         idx === i
           ? {
               ...row,
-              [key]:
-                key === "weight"
-                  ? v === "" ? "" : Number(v)
-                  : v.toUpperCase(),
+              [key]: key === "weight" ? Number(v) : v.toUpperCase(),
             }
           : row
       )
     );
   }
 
-  // -------- Grade logic (preview-only) --------
+  // -------- Grade logic (keep/replace with yours) --------
   function computeGrade(profileInput: InvestorProfile, totalWeight: number): number {
     const base =
       profileInput === "Aggressive Growth" ? 4.5 : profileInput === "Balanced" ? 3.8 : 4.1;
@@ -187,35 +183,30 @@ export default function NewGradePage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  async function onPreviewClick() {
+  async function savePreviewAndGo(args: {
+    provider: string;
+    profile: string;
+    rows: { symbol: string; weight: number }[];
+    gradeBase: number;
+    gradeAdjusted: number;
+  }) {
     setSaveError(null);
     setSaving(true);
     try {
       const provider_display =
-        PROVIDER_DISPLAY[provider] ||
-        provider.replace(/\b\w/g, (c) => c.toUpperCase());
-
-      const cleanRows = rows
-        .map((r) => ({
-          symbol: String(r.symbol || "").toUpperCase().trim(),
-          weight:
-            r.weight === "" ? 0 : Number.isFinite(Number(r.weight)) ? Number(r.weight) : 0,
-        }))
-        .filter((r) => r.symbol);
-
-      const base = computeGrade(profile, total);
-      const adjusted = base;
+        PROVIDER_DISPLAY[args.provider] ||
+        args.provider.replace(/\b\w/g, (c) => c.toUpperCase());
 
       const res = await fetch("/api/preview/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          provider,
+          provider: args.provider,
           provider_display,
-          profile,
-          rows: cleanRows,
-          grade_base: base,
-          grade_adjusted: adjusted,
+          profile: args.profile,
+          rows: args.rows,
+          grade_base: args.gradeBase,
+          grade_adjusted: args.gradeAdjusted,
         }),
       });
 
@@ -224,7 +215,7 @@ export default function NewGradePage() {
         throw new Error(data?.error || "Could not save preview");
       }
 
-      const id = String(data.id);
+      const id = String(data.id); // may be UUID
       if (typeof window !== "undefined") {
         localStorage.setItem("gy4k_preview_id", id);
       }
@@ -236,153 +227,174 @@ export default function NewGradePage() {
     }
   }
 
+  async function onPreviewClick() {
+    const cleanRows = rows
+      .map((r) => ({
+        symbol: String(r.symbol || "").toUpperCase().trim(),
+        weight: Number(r.weight),
+      }))
+      .filter((r) => r.symbol && !Number.isNaN(r.weight));
+
+    const base = computeGrade(profile, total);
+    const adjusted = base; // plug in your other adjustments if you like
+
+    await savePreviewAndGo({
+      provider,
+      profile,
+      rows: cleanRows,
+      gradeBase: base,
+      gradeAdjusted: adjusted,
+    });
+  }
+
   // -------- UI --------
   return (
-    <main className="mx-auto max-w-4xl p-6 space-y-8">
+    <main className="mx-auto max-w-3xl p-6 space-y-6">
       <Stepper current={1} />
 
-      {/* Header */}
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold">Grade your current 401(k)</h1>
-        <p className="text-gray-600">
-          Pick your provider, choose your investor profile, and enter holdings. We’ll give you an instant star grade and key notes.
-        </p>
-      </header>
+      <h1 className="text-2xl font-bold">Get your grade</h1>
 
-      {/* Inputs */}
-      <section className="grid md:grid-cols-2 gap-6">
-        {/* Provider & Profile */}
-        <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium">Provider</label>
-            <select
-              className="w-full border rounded-md p-2 mt-1"
-              value={provider}
-              onChange={(e) => {
-                setProvider(e.target.value);
-                setCatalogSearch("");
-                setSelectedFromList("");
-              }}
-            >
-              <option value="fidelity">Fidelity</option>
-              <option value="vanguard">Vanguard</option>
-              <option value="schwab">Charles Schwab</option>
-              <option value="invesco">Invesco</option>
-              <option value="blackrock">BlackRock / iShares</option>
-              <option value="state-street">State Street / SPDR</option>
-              <option value="voya">Voya</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
+      {/* Provider */}
+      <section className="space-y-2">
+        <label className="text-sm font-medium">1) Select your provider</label>
+        <select
+          className="w-full border rounded-md p-2"
+          value={provider}
+          onChange={(e) => {
+            setProvider(e.target.value);
+            // reset picker state on provider change
+            setCatalogSearch("");
+            setSelectedFromList("");
+          }}
+        >
+          <option value="fidelity">Fidelity</option>
+          <option value="vanguard">Vanguard</option>
+          <option value="schwab">Charles Schwab</option>
+          <option value="invesco">Invesco</option>
+          <option value="blackrock">BlackRock / iShares</option>
+          <option value="state-street">State Street / SPDR</option>
+          <option value="voya">Voya</option>
+          <option value="other">Other</option>
+        </select>
+      </section>
 
-          <div>
-            <label className="text-sm font-medium">Investor profile</label>
-            <select
-              className="w-full border rounded-md p-2 mt-1"
-              value={profile}
-              onChange={(e) => setProfile(e.target.value as InvestorProfile)}
-            >
-              <option value="Aggressive Growth">Aggressive Growth</option>
-              <option value="Growth">Growth</option>
-              <option value="Balanced">Balanced</option>
-            </select>
-          </div>
+      {/* Profile */}
+      <section className="space-y-2">
+        <label className="text-sm font-medium">2) Your investor profile</label>
+        <select
+          className="w-full border rounded-md p-2"
+          value={profile}
+          onChange={(e) => setProfile(e.target.value as InvestorProfile)}
+        >
+          <option value="Aggressive Growth">Aggressive Growth</option>
+          <option value="Growth">Growth</option>
+          <option value="Balanced">Balanced</option>
+        </select>
+      </section>
 
-          {/* Add from provider list (toggle) */}
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowCatalog((s) => !s)}
-              className="text-sm underline text-blue-700"
-              aria-expanded={showCatalog}
-            >
-              {showCatalog ? "Hide provider fund list" : "Add from provider fund list"}
-            </button>
-
-            {showCatalog && (
-              <div className="mt-2 rounded-lg border p-3 bg-white space-y-3">
-                <input
-                  className="border rounded-md p-2 w-full"
-                  placeholder={`Search ${PROVIDER_DISPLAY[provider] || "Provider"} tickers…`}
-                  value={catalogSearch}
-                  onChange={(e) => setCatalogSearch(e.target.value)}
-                />
-                <div className="flex gap-2">
-                  <select
-                    className="border rounded-md p-2 flex-1"
-                    value={selectedFromList}
-                    onChange={(e) => setSelectedFromList(e.target.value)}
-                  >
-                    <option value="">Choose a fund…</option>
-                    {providerList.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="border rounded-md px-3 py-2 hover:bg-gray-50"
-                    onClick={() => selectedFromList && addSymbol(selectedFromList)}
-                  >
-                    Add
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500">
-                  Don’t see it? You can still type any symbol below.
-                </p>
-              </div>
-            )}
-          </div>
+      {/* Holdings */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium">3) Enter your current holdings</div>
+          <button
+            type="button"
+            className="text-sm underline text-blue-700"
+            onClick={() => setShowCatalog((s) => !s)}
+            aria-expanded={showCatalog}
+          >
+            {showCatalog ? "Hide" : "Add from provider list"}
+          </button>
         </div>
 
-        {/* Holdings table */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">Holdings</div>
+        {/* Collapsible “Add from list” */}
+        {showCatalog && (
+          <div className="rounded-lg border p-3 bg-white space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <input
+                className="border rounded-md p-2 md:flex-1"
+                placeholder={`Search ${PROVIDER_DISPLAY[provider] || "Provider"} tickers…`}
+                value={catalogSearch}
+                onChange={(e) => setCatalogSearch(e.target.value)}
+              />
+              <div className="flex items-center gap-2">
+                <select
+                  className="border rounded-md p-2 w-56"
+                  value={selectedFromList}
+                  onChange={(e) => setSelectedFromList(e.target.value)}
+                >
+                  <option value="">Choose a fund…</option>
+                  {providerList.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="border rounded-md px-3 py-2 hover:bg-gray-50"
+                  onClick={() => {
+                    if (selectedFromList) addSymbol(selectedFromList);
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500">
+              Don’t see it? You can still type any symbol in the table below.
+            </p>
+          </div>
+        )}
+
+        {/* Rows table */}
+        {rows.map((row, i) => (
+          <div key={i} className="grid grid-cols-12 gap-3">
+            <input
+              className="col-span-7 border rounded-md p-2"
+              placeholder="Symbol (e.g., FSKAX)"
+              value={row.symbol}
+              onChange={(e) => updateRow(i, "symbol", e.target.value)}
+            />
+            <input
+              type="number"
+              step="0.1"
+              className="col-span-3 border rounded-md p-2"
+              placeholder="Weight %"
+              value={Number.isFinite(row.weight) ? row.weight : ""}
+              onChange={(e) => updateRow(i, "weight", e.target.value)}
+            />
+            <button
+              type="button"
+              className="col-span-2 border rounded-md px-3 py-2 hover:bg-gray-50"
+              onClick={() => removeRow(i)}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={addRow}
-              className="border rounded-md px-3 py-2 hover:bg-gray-50 text-sm"
+              className="border rounded-md px-3 py-2 hover:bg-gray-50"
             >
               Add holding
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                // quick helper: add selected + give it a small default weight
+                if (selectedFromList) {
+                  addSymbol(selectedFromList);
+                }
+              }}
+              className="border rounded-md px-3 py-2 hover:bg-gray-50"
+            >
+              Add selected
+            </button>
           </div>
-
-          {/* Predictive suggestions for symbol input */}
-          <datalist id="provider-funds-list">
-            {(PROVIDER_FUNDS[provider] || []).map((t) => (
-              <option key={t} value={t} />
-            ))}
-          </datalist>
-
-          {rows.map((row, i) => (
-            <div key={i} className="grid grid-cols-12 gap-3">
-              <input
-                className="col-span-7 border rounded-md p-2"
-                placeholder="Symbol (e.g., FSKAX)"
-                list="provider-funds-list"
-                value={row.symbol}
-                onChange={(e) => updateRow(i, "symbol", e.target.value)}
-              />
-              <input
-                type="number"
-                step="0.1"
-                className="col-span-3 border rounded-md p-2"
-                placeholder="Weight %"
-                value={row.weight === "" ? "" : Number(row.weight)}
-                onChange={(e) => updateRow(i, "weight", e.target.value)}
-              />
-              <button
-                type="button"
-                className="col-span-2 border rounded-md px-3 py-2 hover:bg-gray-50"
-                onClick={() => removeRow(i)}
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-
           <div
             className={[
               "text-sm",
@@ -409,7 +421,9 @@ export default function NewGradePage() {
             Choose a provider and make sure weights sum to 100%.
           </p>
         )}
-        {saveError && <p className="mt-2 text-sm text-red-600">{saveError}</p>}
+        {saveError && (
+          <p className="mt-2 text-sm text-red-600">{saveError}</p>
+        )}
       </div>
     </main>
   );
