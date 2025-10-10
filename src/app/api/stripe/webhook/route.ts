@@ -1,77 +1,67 @@
 // src/app/api/stripe/webhook/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { sql } from "@/lib/db"; // your db helper
-
-export const dynamic = "force-dynamic";
+import { sql } from "../../../lib/db"; // adjust if your db helper is elsewhere
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2024-06-20",
 });
 
-const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  let event: Stripe.Event;
+  const sig = req.headers.get("stripe-signature");
 
-  const sig = req.headers.get("stripe-signature") || "";
-  const rawBody = await req.text();
-
-  try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
-  } catch (err: any) {
-    return NextResponse.json({ error: `Webhook signature error: ${err.message}` }, { status: 400 });
+  if (!sig) {
+    return NextResponse.json({ error: "Missing Stripe signature" }, { status: 400 });
   }
 
+  let event: Stripe.Event;
+
+  try {
+    const body = await req.text();
+    event = stripe.webhooks.constructEvent(
+      body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET!
+    );
+  } catch (err: any) {
+    console.error("[webhook] Signature verification failed:", err.message);
+    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
+  }
+
+  // --- Handle checkout.session.completed ---
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
-    // Pull metadata
-    const planKey = (session.metadata?.planKey || "").trim();
-    const previewId = (session.metadata?.previewId || "").trim();
-
-    // Basic guards
-    if (!planKey || !previewId) {
-      // Log and 200 (so Stripe stops retrying, but you can fix data later)
-      console.error("[webhook] missing planKey/previewId in metadata", session.id, session.metadata);
-      return NextResponse.json({ ok: true, note: "missing-metadata" });
-    }
-
-    // Try to get email from session/customer_details
+    const sessionId = session.id;
+    const planKey = session.metadata?.planKey || null;
+    const previewId = session.metadata?.previewId || null;
     const email =
       session.customer_details?.email ||
-      (typeof session.customer === "string" ? undefined : session.customer?.email) ||
-      session.customer_email ||
+      (typeof session.customer === "object" ? session.customer?.email : null) ||
       null;
+    const amount = session.amount_total ?? null;
+    const currency = session.currency ?? null;
+    const status = session.payment_status ?? session.status ?? null;
 
-    // Persist order
     try {
       await sql(
-        `
-          INSERT INTO orders
-            (session_id, email, plan_key, preview_id, amount_total_cents, currency, status, created_at)
-          VALUES
-            ($1, $2, $3, $4, $5, $6, $7, NOW())
-          ON CONFLICT (session_id) DO NOTHING
-        `,
-        [
-          session.id,
-          email,
-          planKey, // <- THIS is the not-null column
-          previewId,
-          session.amount_total ?? 0,
-          session.currency ?? "usd",
-          session.payment_status ?? "unknown",
-        ]
+        `INSERT INTO public.orders
+         (session_id, plan_key, preview_id, email, amount_total, currency, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (session_id) DO NOTHING`,
+        [sessionId, planKey, previewId, email, amount, currency, status]
       );
-    } catch (err) {
-      console.error("[webhook] saveOrder failed:", err);
-      // still return 200 so Stripe doesn’t keep retrying forever
-    }
 
-    // (Optional) kick off your PDF generation/email if you want here
-    // ... or let /api/stripe/success page do the resend button
+      console.log(`[webhook] ✅ Order saved: ${sessionId}`);
+    } catch (err: any) {
+      console.error("[webhook] saveOrder failed:", err);
+      return NextResponse.json({ error: err.message }, { status: 500 });
+    }
+  } else {
+    console.log(`[webhook] Ignored event: ${event.type}`);
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ received: true }, { status: 200 });
 }
