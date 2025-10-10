@@ -4,14 +4,13 @@ import { Pool } from "pg";
 const connectionString = process.env.DATABASE_URL!;
 export const pool = new Pool({
   connectionString,
-  ssl: { rejectUnauthorized: false }, // Neon requires SSL
+  ssl: { rejectUnauthorized: false }, // Neon needs SSL
 });
 
 export async function sql<T = any>(text: string, params: any[] = []) {
   const client = await pool.connect();
   try {
-    const res = await client.query<T>(text, params);
-    return res;
+    return await client.query<T>(text, params);
   } finally {
     client.release();
   }
