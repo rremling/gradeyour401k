@@ -1,6 +1,5 @@
 // src/app/api/preview/save/route.ts
 import { NextRequest } from "next/server";
-// Use RELATIVE import to avoid tsconfig path alias issues in prod builds
 import { sql } from "../../../../lib/db";
 
 export const runtime = "nodejs";
@@ -16,20 +15,22 @@ function j(status: number, data: unknown) {
 }
 
 async function ensureTable() {
+  // Qualify schema and quote "rows"
   await sql(`
-    CREATE TABLE IF NOT EXISTS previews (
+    CREATE SCHEMA IF NOT EXISTS public;
+    CREATE TABLE IF NOT EXISTS public.previews (
       id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       provider TEXT NOT NULL,
       provider_display TEXT NOT NULL,
       profile TEXT NOT NULL,
-      rows JSONB NOT NULL,
+      "rows" JSONB NOT NULL,
       grade_base NUMERIC,
       grade_adjusted NUMERIC,
       ip TEXT
     );
     CREATE INDEX IF NOT EXISTS previews_created_at_idx
-      ON previews (created_at DESC);
+      ON public.previews (created_at DESC);
   `);
 }
 
@@ -38,13 +39,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  // Quick config sanity
   if (!process.env.DATABASE_URL) {
     console.error("[preview/save] Missing DATABASE_URL env var");
     return j(500, { error: "Server DB not configured (DATABASE_URL missing)" });
   }
 
-  // Parse body
   let body: any = null;
   try {
     body = await req.json();
@@ -68,7 +67,6 @@ export async function POST(req: NextRequest) {
     grade_adjusted?: number;
   };
 
-  // Basic validation
   if (
     !provider ||
     !provider_display ||
@@ -82,7 +80,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Normalize rows
   const cleanRows = rows
     .map((r) => ({
       symbol: String(r.symbol || "").toUpperCase().trim(),
@@ -96,24 +93,25 @@ export async function POST(req: NextRequest) {
 
   const ip =
     req.headers.get("x-forwarded-for") ||
-    // @ts-ignore – Next’s Request doesn’t expose ip in types
+    // @ts-ignore
     (req as any).ip ||
     req.headers.get("x-real-ip") ||
     null;
 
-  // Try insert; if table missing, create and retry once
   try {
     const res = await sql<{ id: string }>(
       `
-      INSERT INTO previews (provider, provider_display, profile, rows, grade_base, grade_adjusted, ip)
-      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+      INSERT INTO public.previews
+        (provider, provider_display, profile, "rows", grade_base, grade_adjusted, ip)
+      VALUES
+        ($1, $2, $3, CAST($4 AS jsonb), $5, $6, $7)
       RETURNING id
     `,
       [
         provider,
         provider_display,
         profile,
-        JSON.stringify(cleanRows),
+        JSON.stringify(cleanRows), // pass as string; CAST handles -> jsonb
         grade_base ?? null,
         grade_adjusted ?? null,
         ip,
@@ -128,15 +126,16 @@ export async function POST(req: NextRequest) {
     return j(200, { ok: true, id });
   } catch (e: any) {
     const msg = String(e?.message || e);
-    // If table doesn’t exist, create once and retry
     if (msg.includes("relation") && msg.includes("does not exist")) {
       console.warn("[preview/save] table missing, creating…");
       try {
         await ensureTable();
         const res2 = await sql<{ id: string }>(
           `
-          INSERT INTO previews (provider, provider_display, profile, rows, grade_base, grade_adjusted, ip)
-          VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
+          INSERT INTO public.previews
+            (provider, provider_display, profile, "rows", grade_base, grade_adjusted, ip)
+          VALUES
+            ($1, $2, $3, CAST($4 AS jsonb), $5, $6, $7)
           RETURNING id
         `,
           [
@@ -158,18 +157,12 @@ export async function POST(req: NextRequest) {
         }
         return j(200, { ok: true, id: id2 });
       } catch (e2: any) {
-        console.error(
-          "[preview/save] create/insert retry failed:",
-          e2?.message || e2
-        );
-        // TEMP: return the exact error to help you fix quickly
+        console.error("[preview/save] create/insert retry failed:", e2?.message || e2);
         return j(500, { error: "DB insert (after create) failed", detail: String(e2?.message || e2) });
       }
     }
 
-    // Other DB error
     console.error("[preview/save] insert error:", msg);
-    // TEMP: return the exact error back (remove detail in production)
     return j(500, { error: "DB insert failed", detail: msg });
   }
 }
