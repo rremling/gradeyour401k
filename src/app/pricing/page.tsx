@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-// Reusable stepper
+// Progress bar at top (Step 3 active)
 function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -97,7 +97,7 @@ export default function PricingPage() {
       )}
 
       <div className="grid md:grid-cols-2 gap-6">
-        {/* One-time */}
+        {/* One-time Report */}
         <div className="border rounded-lg bg-white p-6 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -121,7 +121,7 @@ export default function PricingPage() {
           </div>
         </div>
 
-        {/* Annual */}
+        {/* Annual Plan */}
         <div className="border rounded-lg bg-white p-6 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -146,7 +146,7 @@ export default function PricingPage() {
         </div>
       </div>
 
-      {/* Promo code */}
+      {/* Promo code section */}
       <div className="max-w-md mx-auto text-center space-y-3 pt-8">
         <label className="block text-sm font-medium text-gray-700">
           Have a promo code?
@@ -171,16 +171,15 @@ export default function PricingPage() {
         </p>
       </div>
 
-      {/* Agreement */}
+      {/* RIA agreement and get grade link */}
       <div className="text-center text-sm text-gray-600 pt-6">
         By purchasing, you agree to our{" "}
         <Link href="/legal/ria" className="underline text-blue-600">
           RIA Agreement
         </Link>{" "}
-        and acknowledge that this analysis is for informational purposes only.
+        and acknowledge this analysis is for informational purposes only.
       </div>
 
-      {/* Link to get grade */}
       <div className="text-center pt-4">
         <Link
           href="/grade/new"
