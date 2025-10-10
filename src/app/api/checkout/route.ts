@@ -1,69 +1,72 @@
 // src/app/api/checkout/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20",
+});
 
-function getBaseUrl() {
-  const env = process.env.NEXT_PUBLIC_BASE_URL?.trim();
-  if (env) return env.replace(/\/+$/, "");
-  return process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000";
-}
+const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!;
+const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
+const DOMAIN =
+  process.env.NEXT_PUBLIC_BASE_URL ||
+  process.env.VERCEL_URL?.startsWith("http")
+    ? process.env.VERCEL_URL
+    : `https://${process.env.VERCEL_URL || "www.gradeyour401k.com"}`;
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const planKey = (body?.planKey as "one_time" | "annual") || "one_time";
-    const previewId = (body?.previewId as string | undefined) || "";
-    const promotionCodeId = (body?.promotionCodeId as string | undefined) || undefined;
+    const body = await req.json();
+    const planKey = body.planKey as "one_time" | "annual";
+    const previewId = String(body.previewId || "");
+    const promotionCodeId = body.promotionCodeId as string | undefined;
 
-    const secret = process.env.STRIPE_SECRET_KEY;
-    if (!secret) {
-      return NextResponse.json({ error: "Missing STRIPE_SECRET_KEY" }, { status: 500 });
+    if (!planKey || !previewId) {
+      return NextResponse.json(
+        { error: "Missing planKey or previewId" },
+        { status: 400 }
+      );
     }
 
-    const priceOneTime = process.env.STRIPE_PRICE_ID_ONE_TIME || process.env.STRIPE_PRICE_ID_DEFAULT;
-    const priceAnnual = process.env.STRIPE_PRICE_ID_ANNUAL;
-
-    const isSubscription = planKey === "annual";
-    const priceId = isSubscription ? priceAnnual : priceOneTime;
-    if (!priceId) {
+    const price = planKey === "annual" ? PRICE_ANNUAL : PRICE_ONE_TIME;
+    if (!price) {
       return NextResponse.json(
-        { error: isSubscription ? "Missing STRIPE_PRICE_ID_ANNUAL" : "Missing STRIPE_PRICE_ID_ONE_TIME (or STRIPE_PRICE_ID_DEFAULT)" },
+        { error: `Missing Stripe price for planKey=${planKey}` },
         { status: 500 }
       );
     }
 
-    const stripe = new Stripe(secret, { apiVersion: "2024-06-20" });
-    const origin = getBaseUrl();
-
     const params: Stripe.Checkout.SessionCreateParams = {
-      mode: isSubscription ? "subscription" : "payment",
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/pricing`,
-      metadata: { planKey, previewId },
+      mode: planKey === "annual" ? "subscription" : "payment",
+      line_items: [{ price, quantity: 1 }],
+      success_url: `${DOMAIN}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${DOMAIN}/pricing`,
+      // REQUIRED: include metadata that webhook will persist
+      metadata: {
+        planKey,
+        previewId,
+      },
+      // Optional promo code (use either allow_promotion_codes OR discounts)
+      ...(promotionCodeId
+        ? { discounts: [{ promotion_code: promotionCodeId }] }
+        : { allow_promotion_codes: true }),
+      // Make sure we get the email in the session object
+      customer_creation:
+        planKey === "annual" ? undefined : "always" /* only in payment mode */,
     };
 
-    // Only allowed for payment mode
-    if (!isSubscription) {
-      // @ts-expect-error - valid in payment mode only
-      params.customer_creation = "always";
-    }
-
-    // Exactly one of these:
-    if (promotionCodeId) {
-      params.discounts = [{ promotion_code: promotionCodeId }];
-    } else {
-      params.allow_promotion_codes = true;
+    // Note: Stripe restricts `customer_creation` to payment mode.
+    if (planKey === "annual") {
+      // remove any accidental customer_creation if set
+      // (not needed here since we conditionally set above)
     }
 
     const session = await stripe.checkout.sessions.create(params);
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    const msg = err?.raw?.message || err?.message || "Failed to start Checkout";
-    console.error("checkout error:", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(
+      { error: `Checkout failed: ${err.message || "unknown"}` },
+      { status: 500 }
+    );
   }
 }
