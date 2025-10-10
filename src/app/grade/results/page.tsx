@@ -5,7 +5,7 @@ import { sql } from "../../../lib/db"; // adjust if your alias/path differs
 type SearchParams = { previewId?: string };
 type Holding = { symbol: string; weight: number };
 
-// Server-rendered stepper (no hooks)
+// ---- Stepper (mobile-friendly like the grade page) ----
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -16,12 +16,13 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
 
   return (
     <div className="w-full mb-6">
-      <ol className="flex items-center gap-3 text-sm">
-        {steps.map((s, idx) => {
+      {/* Compact on mobile */}
+      <ol className="flex sm:hidden items-end justify-between gap-2">
+        {steps.map((s) => {
           const isActive = s.n === current;
           const isComplete = s.n < current;
           return (
-            <li key={s.n} className="flex items-center gap-3">
+            <li key={s.n} className="flex-1 flex flex-col items-center gap-1 min-w-0">
               <div
                 className={[
                   "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
@@ -34,26 +35,62 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
               >
                 {s.n}
               </div>
-              <span
+              <div
                 className={[
-                  "whitespace-nowrap",
+                  "text-[10px] leading-tight text-center truncate max-w-[5.5rem]",
                   isActive ? "font-semibold text-blue-700" : "text-gray-700",
                 ].join(" ")}
               >
                 {s.label}
-              </span>
-              {idx < steps.length - 1 && (
-                <div
-                  className={[
-                    "mx-2 h-px w-10 md:w-16",
-                    isComplete ? "bg-blue-600" : "bg-gray-300",
-                  ].join(" ")}
-                />
-              )}
+              </div>
             </li>
           );
         })}
       </ol>
+
+      {/* Full labels with horizontal scroll on larger screens */}
+      <div className="hidden sm:block">
+        <div className="-mx-3 overflow-x-auto overscroll-x-contain">
+          <ol className="flex items-center gap-3 flex-nowrap px-3">
+            {steps.map((s, idx) => {
+              const isActive = s.n === current;
+              const isComplete = s.n < current;
+              return (
+                <li key={s.n} className="flex items-center gap-3 shrink-0">
+                  <div
+                    className={[
+                      "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
+                      isActive
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : isComplete
+                        ? "border-blue-600 text-blue-600"
+                        : "border-gray-300 text-gray-600",
+                    ].join(" ")}
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={[
+                      "whitespace-nowrap",
+                      isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                    ].join(" ")}
+                  >
+                    {s.label}
+                  </span>
+                  {idx < steps.length - 1 && (
+                    <div
+                      className={[
+                        "mx-2 h-px w-10 md:w-16",
+                        isComplete ? "bg-blue-600" : "bg-gray-300",
+                      ].join(" ")}
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </div>
     </div>
   );
 }
@@ -172,7 +209,6 @@ export default async function ResultPage({
       : null;
 
   const grade = numericGrade !== null ? numericGrade.toFixed(1) : "—";
-
   const total = holdings.reduce(
     (s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0),
     0
@@ -185,8 +221,8 @@ export default async function ResultPage({
       <header className="space-y-2">
         <h1 className="text-2xl font-bold">Your Grade</h1>
         <p className="text-gray-600">
-          Provider: <span className="font-medium">{providerDisplay}</span> ·
-          {" "}Profile: <span className="font-medium">{profile}</span>
+          Provider: <span className="font-medium">{providerDisplay}</span> ·{" "}
+          Profile: <span className="font-medium">{profile}</span>
         </p>
       </header>
 
@@ -219,16 +255,14 @@ export default async function ResultPage({
         )}
       </section>
 
-      {/* What you get with the full report (replaces “reasons”) */}
+      {/* What you get with the full report — concise & persuasive */}
       <section className="rounded-lg border p-6 bg-white">
         <h2 className="font-semibold">What you get with the full report</h2>
         <ul className="list-disc list-inside text-sm text-gray-800 mt-2 space-y-1">
-          <li>Model comparison vs. curated ETF allocations for your profile.</li>
-          <li>Market cycle overlay (SPY 30/50/100/200-day SMA) to sensibly tilt risk.</li>
-          <li>Actionable “increase / decrease / replace” guidance with a reallocation roadmap.</li>
-          <li>Fee and diversification diagnostics; sector/factor exposure view.</li>
-          <li>Shareable star grade, delivered as a polished PDF to your inbox.</li>
-          <li>Annual plan includes 3 additional re-grades over the next 12 months.</li>
+          <li><strong>Clear actions</strong> to increase, decrease, or replace specific funds.</li>
+          <li><strong>Model match</strong> to a curated ETF allocation for your profile.</li>
+          <li><strong>Market-aware tilt</strong> using SPY 30/50/100/200-day SMA trend.</li>
+          <li><strong>Polished PDF</strong> delivered to your inbox—ready to implement or share.</li>
         </ul>
       </section>
 
