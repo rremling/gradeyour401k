@@ -1,15 +1,20 @@
 // src/app/api/debug/db/route.ts
-import { NextResponse } from "next/server";
-import { query } from "@/lib/db";
+import { sql } from "../../../../lib/db";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+
+function j(status: number, data: any) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 export async function GET() {
   try {
-    const rows = await query<{ now: string }>("select now()::text as now");
-    return NextResponse.json({ ok: true, now: rows[0]?.now || null });
+    const r = await sql("SELECT now() as now");
+    return j(200, { ok: true, now: r.rows?.[0]?.now });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
+    return j(500, { ok: false, error: String(e?.message || e) });
   }
 }
