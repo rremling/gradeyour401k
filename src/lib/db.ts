@@ -1,26 +1,17 @@
 // src/lib/db.ts
 import { Pool } from "pg";
 
-let pool: Pool | null = null;
+const connectionString = process.env.DATABASE_URL!;
+export const pool = new Pool({
+  connectionString,
+  ssl: { rejectUnauthorized: false }, // Neon requires SSL
+});
 
-export function getPool() {
-  if (!process.env.DATABASE_URL) return null;
-  if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }, // Neon requires SSL; this works with sslmode=require too
-    });
-  }
-  return pool;
-}
-
-export async function query<T = any>(text: string, params?: any[]) {
-  const p = getPool();
-  if (!p) throw new Error("DB not configured");
-  const client = await p.connect();
+export async function sql<T = any>(text: string, params: any[] = []) {
+  const client = await pool.connect();
   try {
     const res = await client.query<T>(text, params);
-    return res.rows as T[];
+    return res;
   } finally {
     client.release();
   }
