@@ -9,10 +9,9 @@ export default async function ResultPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const previewId = searchParams.previewId;
+  const previewId = (searchParams.previewId || "").trim();
 
-  // If no previewId, guide the user
-  if (!previewId || !/^\d+$/.test(previewId)) {
+  if (!previewId) {
     return (
       <main className="mx-auto max-w-3xl p-6 space-y-4">
         <h1 className="text-2xl font-bold">Your Grade</h1>
@@ -30,11 +29,12 @@ export default async function ResultPage({
     );
   }
 
-  // Fetch the preview snapshot from DB
+  // Works for uuid or bigint ids by casting to text
   const r = await sql(
     `SELECT id, created_at, provider, provider_display, profile, "rows", grade_base, grade_adjusted
      FROM public.previews
-     WHERE id = $1`,
+     WHERE id::text = $1
+     LIMIT 1`,
     [previewId]
   );
   const p: any = r.rows?.[0];
