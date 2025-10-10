@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
 type Holding = { symbol: string; weight: number };
 
+// Map internal provider key -> display name for DB/PDF
 const PROVIDER_DISPLAY: Record<string, string> = {
   fidelity: "Fidelity",
   vanguard: "Vanguard",
@@ -18,10 +19,63 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   other: "Other",
 };
 
+// Simple, hook-less stepper (client-safe)
+function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
+  const steps = [
+    { n: 1, label: "Get Grade" },
+    { n: 2, label: "Review" },
+    { n: 3, label: "Purchase" },
+    { n: 4, label: "Report Sent" },
+  ] as const;
+
+  return (
+    <div className="w-full mb-6">
+      <ol className="flex items-center gap-3 text-sm">
+        {steps.map((s, idx) => {
+          const isActive = s.n === current;
+          const isComplete = s.n < current;
+          return (
+            <li key={s.n} className="flex items-center gap-3">
+              <div
+                className={[
+                  "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
+                  isActive
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : isComplete
+                    ? "border-blue-600 text-blue-600"
+                    : "border-gray-300 text-gray-600",
+                ].join(" ")}
+              >
+                {s.n}
+              </div>
+              <span
+                className={[
+                  "whitespace-nowrap",
+                  isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                ].join(" ")}
+              >
+                {s.label}
+              </span>
+              {idx < steps.length - 1 && (
+                <div
+                  className={[
+                    "mx-2 h-px w-10 md:w-16",
+                    isComplete ? "bg-blue-600" : "bg-gray-300",
+                  ].join(" ")}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 export default function NewGradePage() {
   const router = useRouter();
 
-  // ——— Your existing state (adjust defaults as you like) ———
+  // State (restore your earlier defaults if you prefer)
   const [provider, setProvider] = useState("fidelity");
   const [profile, setProfile] = useState<InvestorProfile>("Growth");
   const [rows, setRows] = useState<Holding[]>([
@@ -33,7 +87,6 @@ export default function NewGradePage() {
     () => rows.reduce((s, r) => s + (Number(r.weight) || 0), 0),
     [rows]
   );
-
   const canSubmit = provider && Math.abs(total - 100) < 0.1;
 
   function addRow() {
@@ -55,10 +108,7 @@ export default function NewGradePage() {
     );
   }
 
-  // ——— Save + navigate helpers ———
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-
+  // Old computeGrade style (feel free to drop your previous logic back in)
   function computeGrade(profileInput: InvestorProfile, totalWeight: number): number {
     const base =
       profileInput === "Aggressive Growth" ? 4.5 : profileInput === "Balanced" ? 3.8 : 4.1;
@@ -66,6 +116,9 @@ export default function NewGradePage() {
     const grade = Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
     return grade;
   }
+
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function savePreviewAndGo(args: {
     provider: string;
@@ -99,7 +152,7 @@ export default function NewGradePage() {
         throw new Error(data?.error || "Could not save preview");
       }
 
-      const id = String(data.id);
+      const id = String(data.id); // may be UUID
       if (typeof window !== "undefined") {
         localStorage.setItem("gy4k_preview_id", id);
       }
@@ -120,7 +173,7 @@ export default function NewGradePage() {
       .filter((r) => r.symbol && !Number.isNaN(r.weight));
 
     const base = computeGrade(profile, total);
-    const adjusted = base;
+    const adjusted = base; // you can re-apply your earlier adjustments here
 
     await savePreviewAndGo({
       provider,
@@ -131,15 +184,17 @@ export default function NewGradePage() {
     });
   }
 
-  // ——— UI (keep your existing layout; this is minimal) ———
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
+      <Stepper current={1} />
+
       <h1 className="text-2xl font-bold">Get your grade</h1>
 
-      <section>
-        <label className="text-sm font-medium">1) Provider</label>
+      {/* Provider */}
+      <section className="space-y-2">
+        <label className="text-sm font-medium">1) Select your provider</label>
         <select
-          className="w-full border rounded-md p-2 mt-1"
+          className="w-full border rounded-md p-2"
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
         >
@@ -154,21 +209,23 @@ export default function NewGradePage() {
         </select>
       </section>
 
-      <section>
-        <label className="text-sm font-medium">2) Profile</label>
+      {/* Profile */}
+      <section className="space-y-2">
+        <label className="text-sm font-medium">2) Your investor profile</label>
         <select
-          className="w-full border rounded-md p-2 mt-1"
+          className="w-full border rounded-md p-2"
           value={profile}
           onChange={(e) => setProfile(e.target.value as InvestorProfile)}
         >
-          <option>Aggressive Growth</option>
-          <option>Growth</option>
-          <option>Balanced</option>
+          <option value="Aggressive Growth">Aggressive Growth</option>
+          <option value="Growth">Growth</option>
+          <option value="Balanced">Balanced</option>
         </select>
       </section>
 
-      <section className="space-y-3">
-        <div className="text-sm font-medium">3) Holdings</div>
+      {/* Holdings */}
+      <section className="space-y-4">
+        <div className="text-sm font-medium">3) Enter your current holdings</div>
         {rows.map((row, i) => (
           <div key={i} className="grid grid-cols-12 gap-3">
             <input
