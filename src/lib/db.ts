@@ -17,7 +17,7 @@ export async function sql<T = any>(text: string, params: any[] = []) {
   }
 }
 
-// ✅ Alias for routes that import { query } from "@/lib/db"
+// Optional alias if some routes import { query }
 export async function query<T = any>(text: string, params: any[] = []) {
   return sql<T>(text, params);
 }
