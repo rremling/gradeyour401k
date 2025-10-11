@@ -1,297 +1,226 @@
 // src/app/api/report/generate-and-email/route.ts
-import { NextResponse } from "next/server";
-import { sql } from "../../../../lib/db"; // <-- ensure this path is correct for your project
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { Resend } from "resend";
+import { NextRequest, NextResponse } from "next/server";
+import { Pool } from "pg";
+import { sendReportEmail } from "../../../lib/email"; // <= adjust path if your libs live elsewhere
+import { generatePdfBuffer } from "../../../lib/report"; // <= must export this from lib/report
+// If you don't have those helpers, I can give you inline fallbacks.
 
-type PreviewRow = {
-  id: string;
-  provider: string | null;
-  provider_display: string | null;
-  profile: string | null;
-  rows: any;
-  grade_base: number | null;
-  grade_adjusted: number | null;
-};
+export const dynamic = "force-dynamic";
 
-type OrderRow = {
-  email: string | null;
-  preview_id: string | null;
-  status: string | null;
-  stripe_session_id: string | null;
-  created_at: string | null;
-};
+const DATABASE_URL = process.env.DATABASE_URL || "";
+if (!DATABASE_URL) console.warn("[report] Missing DATABASE_URL");
 
-// ---------- helpers: robust input parsing ----------
-function getHeader(req: Request, name: string) {
-  const v = req.headers.get(name) || req.headers.get(name.toLowerCase());
-  return v ? v.trim() : "";
-}
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-async function parseBodySafe(req: Request): Promise<any> {
+// ---- helpers ---------------------------------------------------------------
+
+async function readJsonSafe(req: NextRequest) {
   try {
-    // If no body, req.json() throws; catch & return {}
-    return await req.json();
+    const txt = await req.text();
+    if (!txt) return {};
+    return JSON.parse(txt);
   } catch {
     return {};
   }
 }
 
-function pickFirst(...vals: Array<string | null | undefined>) {
-  for (const v of vals) {
-    if (typeof v === "string" && v.trim() !== "") return v.trim();
-  }
-  return "";
-}
+async function resolveContext(req: NextRequest) {
+  const url = new URL(req.url);
+  const qp = url.searchParams;
 
-// ---------- DB lookups ----------
-async function findOrderBySession(sessionId: string) {
-  const r = await sql<OrderRow>`
-    SELECT email, preview_id, status, stripe_session_id, created_at
-    FROM public.orders
-    WHERE stripe_session_id = ${sessionId}
-    LIMIT 1
-  `;
-  return r.rows?.[0] || null;
-}
+  // Accept either casing from querystring (session_id from Stripe success URL)
+  const qsPreview =
+    qp.get("previewId") || qp.get("preview_id") || undefined;
+  const qsSession =
+    qp.get("session_id") || qp.get("sessionId") || undefined;
+  const qsEmail = qp.get("email") || undefined;
 
-async function latestPaidOrderByEmail(email: string) {
-  const r = await sql<OrderRow>`
-    SELECT email, preview_id, status, stripe_session_id, created_at
-    FROM public.orders
-    WHERE email = ${email} AND status = 'paid'
-    ORDER BY created_at DESC
-    LIMIT 1
-  `;
-  return r.rows?.[0] || null;
-}
+  // Accept from JSON body too
+  const body = await readJsonSafe(req as any);
+  const bodyPreview =
+    (body.previewId as string) || (body.preview_id as string) || undefined;
+  const bodySession =
+    (body.sessionId as string) || (body.session_id as string) || undefined;
+  const bodyEmail = (body.email as string) || undefined;
 
-async function latestPaidOrderByPreview(previewId: string) {
-  const r = await sql<OrderRow>`
-    SELECT email, preview_id, status, stripe_session_id, created_at
-    FROM public.orders
-    WHERE preview_id::text = ${previewId} AND status = 'paid'
-    ORDER BY created_at DESC
-    LIMIT 1
-  `;
-  return r.rows?.[0] || null;
-}
+  // First pass (raw)
+  let previewId = qsPreview ?? bodyPreview;
+  let sessionId = qsSession ?? bodySession;
+  let email = qsEmail ?? bodyEmail;
 
-// ---------- PDF + Email ----------
-async function buildPdf(opts: {
-  provider: string;
-  profile: string;
-  grade: string;
-  holdings: { symbol: string; weight: number }[];
-}) {
-  const doc = await PDFDocument.create();
-  const page = doc.addPage([612, 792]);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-
-  const margin = 50;
-  let y = 792 - margin;
-
-  const line = (text: string, size = 12, color = rgb(0, 0, 0)) => {
-    page.drawText(text, { x: margin, y, size, font, color });
-    y -= size + 6;
-  };
-
-  line("GradeYour401k — Preliminary Report", 18);
-  line(`Provider: ${opts.provider}`);
-  line(`Profile: ${opts.profile}`);
-  line(`Grade: ${opts.grade} / 5`, 14);
-
-  y -= 6;
-  line("Holdings", 14);
-  if (!opts.holdings.length) {
-    line("None provided.");
-  } else {
-    opts.holdings.forEach((h) => {
-      line(`${(Number(h.weight) || 0).toFixed(1)}% ${String(h.symbol).toUpperCase()}`, 11);
-    });
+  // If we have sessionId but no previewId/email, look up in orders
+  if (!previewId || !email) {
+    if (sessionId) {
+      const r = await pool.query(
+        `SELECT preview_id, email
+           FROM public.orders
+          WHERE stripe_session_id = $1
+          LIMIT 1`,
+        [sessionId]
+      );
+      if (r.rows[0]) {
+        previewId = previewId || r.rows[0].preview_id || undefined;
+        email = email || r.rows[0].email || undefined;
+      }
+    }
   }
 
-  const bytes = await doc.save();
-  return Buffer.from(bytes);
-}
-
-async function sendEmailWithPdf(params: {
-  to: string;
-  provider: string;
-  profile: string;
-  grade: string;
-  holdings: { symbol: string; weight: number }[];
-}) {
-  const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-  const FROM_EMAIL = process.env.FROM_EMAIL || "";
-  if (!RESEND_API_KEY) throw new Error("Missing RESEND_API_KEY");
-  if (!FROM_EMAIL) throw new Error("Missing FROM_EMAIL");
-
-  const resend = new Resend(RESEND_API_KEY);
-  const pdf = await buildPdf(params);
-
-  const { error } = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: params.to,
-    subject: "Your GradeYour401k report",
-    html: `
-      <div style="font-family:Arial, sans-serif; line-height:1.5">
-        <p>Thanks for using GradeYour401k!</p>
-        <p>Your preliminary PDF is attached.</p>
-        <ul>
-          <li><strong>Provider:</strong> ${params.provider}</li>
-          <li><strong>Profile:</strong> ${params.profile}</li>
-          <li><strong>Grade:</strong> ${params.grade} / 5</li>
-        </ul>
-      </div>
-    `,
-    attachments: [{ filename: "GradeYour401k_Report.pdf", content: pdf.toString("base64") }],
-  });
-
-  if (error) throw new Error(`Resend error: ${error.message || String(error)}`);
-}
-
-// ---------- core resolver ----------
-async function resolvePreviewAndEmail(input: {
-  previewId?: string;
-  sessionId?: string;
-  email?: string;
-  send?: boolean;
-}) {
-  let previewId = (input.previewId || "").trim();
-  let email = (input.email || "").trim();
-  const sessionId = (input.sessionId || "").trim();
-
-  const tried: string[] = [];
-
-  if (!previewId && sessionId) {
-    tried.push("by sessionId");
-    const ord = await findOrderBySession(sessionId);
-    if (ord?.preview_id) previewId = String(ord.preview_id);
-    if (!email && ord?.email) email = ord.email.trim();
-  }
-
+  // If we still don't have previewId but we have email, grab latest order
   if (!previewId && email) {
-    tried.push("latest paid order by email");
-    const ord = await latestPaidOrderByEmail(email);
-    if (ord?.preview_id) previewId = String(ord.preview_id);
-  }
-
-  if (previewId && !email) {
-    tried.push("latest paid order by previewId");
-    const ord = await latestPaidOrderByPreview(previewId);
-    if (ord?.email) email = ord.email.trim();
-  }
-
-  if (!previewId) {
-    throw new Error(
-      `Missing previewId. Tried: ${tried.join(
-        " → "
-      )}. Provide one of: previewId, sessionId, or email.`
+    const r = await pool.query(
+      `SELECT preview_id
+         FROM public.orders
+        WHERE email = $1
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [email]
     );
-  }
-  if (!email) {
-    throw new Error(
-      `Missing destination email. Tried: ${tried.join(
-        " → "
-      )}. Provide one of: email, sessionId (with an order), or a previewId that has a paid order.`
-    );
+    if (r.rows[0]?.preview_id) {
+      previewId = r.rows[0].preview_id;
+    }
   }
 
-  // Load preview
-  const pr = await sql<PreviewRow>`
-    SELECT id, provider, provider_display, profile, "rows", grade_base, grade_adjusted
-    FROM public.previews
-    WHERE id::text = ${previewId}
-    LIMIT 1
-  `;
-  const p = pr.rows?.[0];
-  if (!p) throw new Error(`Preview not found for id ${previewId}`);
+  return { previewId, sessionId, email };
+}
 
-  const providerDisplay = p.provider_display || p.provider || "—";
-  const profile = p.profile || "—";
-  const gradeNum =
-    typeof p.grade_adjusted === "number"
-      ? p.grade_adjusted
-      : typeof p.grade_base === "number"
-      ? p.grade_base
-      : null;
-  const grade = gradeNum !== null ? gradeNum.toFixed(1) : "—";
+async function loadPreview(previewId: string) {
+  const r = await pool.query(
+    `SELECT id, provider, provider_display, profile, "rows", grade_base, grade_adjusted
+       FROM public.previews
+      WHERE id::text = $1
+      LIMIT 1`,
+    [previewId]
+  );
+  return r.rows[0] ?? null;
+}
 
-  let holdings: { symbol: string; weight: number }[] = [];
+// ---- GET: for quick manual testing in the browser -------------------------
+export async function GET(req: NextRequest) {
   try {
-    const raw = p.rows;
-    const arr = Array.isArray(raw) ? raw : JSON.parse(raw as any);
-    holdings = (arr as any[]).map((r) => ({
-      symbol: String(r?.symbol || "").toUpperCase(),
-      weight: Number(r?.weight || 0),
-    }));
-  } catch {
-    holdings = [];
-  }
+    const { previewId, sessionId, email } = await resolveContext(req);
+    if (!previewId) {
+      return NextResponse.json(
+        {
+          error:
+            `Missing previewId. Tried: ${sessionId ?? ""} / ${email ?? ""}. ` +
+            `Provide one of: previewId, sessionId, or email.`,
+        },
+        { status: 400 }
+      );
+    }
 
-  if (input.send) {
-    await sendEmailWithPdf({
-      to: email,
-      provider: providerDisplay,
-      profile,
-      grade,
-      holdings,
+    const preview = await loadPreview(previewId);
+    if (!preview) {
+      return NextResponse.json(
+        { error: `Preview not found for previewId=${previewId}` },
+        { status: 404 }
+      );
+    }
+
+    // Minimal PDF + email send (no-op on GET; we just prove resolution works)
+    return NextResponse.json({
+      ok: true,
+      resolved: { previewId, sessionId: sessionId ?? null, email: email ?? null },
+      preview: {
+        provider: preview.provider_display || preview.provider,
+        profile: preview.profile,
+        rowsCount: Array.isArray(preview.rows)
+          ? preview.rows.length
+          : (() => {
+              try {
+                return JSON.parse(preview.rows)?.length ?? 0;
+              } catch {
+                return 0;
+              }
+            })(),
+      },
     });
-  }
-
-  return {
-    ok: true as const,
-    previewId,
-    email,
-    provider: providerDisplay,
-    profile,
-    grade,
-    holdingsCount: holdings.length,
-  };
-}
-
-// ---------- POST (normal path) ----------
-export async function POST(req: Request) {
-  try {
-    const body = await parseBodySafe(req);
-    // Also accept through headers as a fallback
-    const headerPreview = getHeader(req, "x-preview-id");
-    const headerSession = getHeader(req, "x-session-id");
-    const headerEmail = getHeader(req, "x-email");
-    const sendFlag = String(body?.send ?? getHeader(req, "x-send")).toLowerCase();
-
-    const previewId = pickFirst(body?.previewId, headerPreview);
-    const sessionId = pickFirst(body?.sessionId, headerSession);
-    const email = pickFirst(body?.email, headerEmail);
-    const send = sendFlag === "1" || sendFlag === "true";
-
-    const result = await resolvePreviewAndEmail({ previewId, sessionId, email, send: true });
-    return NextResponse.json(result);
-  } catch (err: any) {
-    console.error("[report generate-and-email POST] error:", err);
-    return NextResponse.json({ error: err?.message || "Failed" }, { status: 400 });
+  } catch (e: any) {
+    console.error("[report GET] error:", e);
+    return NextResponse.json({ error: e?.message || "error" }, { status: 500 });
   }
 }
 
-// ---------- GET (debug / manual trigger) ----------
-// Examples:
-// /api/report/generate-and-email?sessionId=cs_... (dry run, resolves only)
-// /api/report/generate-and-email?sessionId=cs_...&send=1 (resolve + email)
-export async function GET(req: Request) {
+// ---- POST: actually generate the PDF and send email -----------------------
+export async function POST(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const previewId = searchParams.get("previewId") || "";
-    const sessionId = searchParams.get("sessionId") || "";
-    const email = searchParams.get("email") || "";
-    const send = ["1", "true", "yes"].includes(
-      (searchParams.get("send") || "").toLowerCase()
+    const { previewId, sessionId, email } = await resolveContext(req);
+    if (!previewId) {
+      return NextResponse.json(
+        {
+          error:
+            `Missing previewId. Tried: ${sessionId ?? ""} / ${email ?? ""}. ` +
+            `Provide one of: previewId, sessionId, or email.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const preview = await loadPreview(previewId);
+    if (!preview) {
+      return NextResponse.json(
+        { error: `Preview not found for previewId=${previewId}` },
+        { status: 404 }
+      );
+    }
+
+    // Resolve destination email if still unknown
+    let dest = email ?? null;
+    if (!dest && sessionId) {
+      const r = await pool.query(
+        `SELECT email FROM public.orders WHERE stripe_session_id = $1 LIMIT 1`,
+        [sessionId]
+      );
+      dest = r.rows[0]?.email ?? null;
+    }
+    if (!dest) {
+      return NextResponse.json(
+        { error: "Missing destination email (no order email found)" },
+        { status: 400 }
+      );
+    }
+
+    // Normalize rows array
+    let rows: Array<{ symbol: string; weight: number }> = [];
+    if (Array.isArray(preview.rows)) {
+      rows = preview.rows;
+    } else {
+      try {
+        rows = JSON.parse(preview.rows ?? "[]");
+      } catch {
+        rows = [];
+      }
+    }
+
+    // Build the PDF buffer (your generator should not require font files on disk)
+    const pdf = await generatePdfBuffer({
+      provider: preview.provider_display || preview.provider || "",
+      profile: preview.profile || "",
+      grade:
+        typeof preview.grade_adjusted === "number"
+          ? preview.grade_adjusted
+          : typeof preview.grade_base === "number"
+          ? preview.grade_base
+          : null,
+      rows,
+    });
+
+    // Email it
+    await sendReportEmail({
+      to: dest,
+      previewId,
+      pdfBuffer: pdf,
+    });
+
+    return NextResponse.json({ ok: true, emailed: dest, previewId });
+  } catch (e: any) {
+    console.error("[report generate-and-email POST] error:", e);
+    return NextResponse.json(
+      { error: e?.message || "internal error" },
+      { status: 500 }
     );
-
-    const result = await resolvePreviewAndEmail({ previewId, sessionId, email, send });
-    return NextResponse.json(result);
-  } catch (err: any) {
-    console.error("[report generate-and-email GET] error:", err);
-    return NextResponse.json({ error: err?.message || "Failed" }, { status: 400 });
   }
 }
