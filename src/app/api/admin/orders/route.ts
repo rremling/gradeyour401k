@@ -4,53 +4,32 @@ import { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
 
+const DATABASE_URL = process.env.DATABASE_URL || "";
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  // Accept token from header OR from query param (?token=) to simplify debugging
-  const headerAuth = req.headers.get("authorization");
-  const headerToken = headerAuth?.startsWith("Bearer ")
-    ? headerAuth.slice("Bearer ".length)
-    : null;
-  const qpToken = url.searchParams.get("token");
-  const token = headerToken || qpToken;
+  // Auth: Bearer <ADMIN_TOKEN>
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
 
-  const adminPassword = process.env.ADMIN_PASSWORD || "";
-
-  if (!adminPassword) {
-    return NextResponse.json(
-      { error: "Server misconfigured: ADMIN_PASSWORD not set" },
-      { status: 500 }
-    );
-  }
-
-  if (!token || token !== adminPassword) {
-    return NextResponse.json(
-      { error: "Unauthorized: bad or missing token" },
-      { status: 401 }
-    );
+  if (!ADMIN_TOKEN || token !== ADMIN_TOKEN) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    const result = await pool.query(
-      `
-      SELECT id, email, plan_key, status, preview_id, stripe_session_id, created_at
-      FROM public.orders
-      ORDER BY created_at DESC
-      LIMIT 500
-    `
+    const { rows } = await pool.query(
+      `SELECT id, email, plan_key, status, preview_id, stripe_session_id, created_at, next_due_1
+       FROM public.orders
+       ORDER BY created_at DESC
+       LIMIT 200`
     );
-
-    return NextResponse.json({ orders: result.rows });
-  } catch (err: any) {
-    console.error("[admin/orders/api] DB error:", err?.message || err);
-    return NextResponse.json(
-      { error: "Database query failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true, orders: rows });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || "DB error" }, { status: 500 });
   }
 }
