@@ -18,21 +18,35 @@ export default function AdminOrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<number | null>(null);
   const [rowMsg, setRowMsg] = useState<Record<number, string>>({});
+  const [lastStatus, setLastStatus] = useState<number | null>(null);
 
   async function fetchOrders(authToken: string) {
     setError(null);
+    setLastStatus(null);
     try {
-      const res = await fetch("/admin/orders/api", {
+      // Send token both ways (header + query param) to simplify proxy/debugging
+      const res = await fetch(`/admin/orders/api?token=${encodeURIComponent(authToken)}`, {
         headers: { Authorization: `Bearer ${authToken}` },
+        cache: "no-store",
       });
-      if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || `HTTP ${res.status}`);
+      setLastStatus(res.status);
+
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Non-JSON response (HTTP ${res.status}): ${text.slice(0, 200)}`);
       }
-      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+
       setOrders(data.orders || []);
     } catch (err: any) {
       console.error("Fetch failed:", err);
+      setOrders([]);
       setError(err.message || "Failed to load orders");
     }
   }
@@ -40,11 +54,13 @@ export default function AdminOrdersPage() {
   function handleLogin() {
     setToken(input);
     localStorage.setItem("admin_token", input);
+    fetchOrders(input);
   }
 
   function logout() {
     setToken(null);
     localStorage.removeItem("admin_token");
+    setOrders([]);
   }
 
   useEffect(() => {
@@ -61,17 +77,13 @@ export default function AdminOrdersPage() {
     setSendingId(order.id);
 
     try {
-      // This endpoint should already exist in your app:
-      // /api/report/generate-and-email
-      // It supports POST with any of: previewId, sessionId, or email
       const res = await fetch("/api/report/generate-and-email", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, // optional; your endpoint can ignore this
+          Authorization: `Bearer ${token}`, // optional
         },
         body: JSON.stringify({
-          // Provide as many identifiers as possible:
           previewId: order.preview_id || undefined,
           sessionId: order.stripe_session_id,
           email: order.email || undefined,
@@ -80,10 +92,7 @@ export default function AdminOrdersPage() {
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(
-          data?.error ||
-            `Resend failed (HTTP ${res.status})`
-        );
+        throw new Error(data?.error || `Resend failed (HTTP ${res.status})`);
       }
       setRowMsg((m) => ({ ...m, [order.id]: "Resent! Check the inbox." }));
     } catch (e: any) {
@@ -116,16 +125,23 @@ export default function AdminOrdersPage() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl p-6">
-      <div className="flex justify-between items-center mb-4">
+    <main className="mx-auto max-w-5xl p-6 space-y-4">
+      <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Admin Orders</h1>
         <div className="flex gap-3 items-center">
           <button
-            onClick={() => fetchOrders(token!)}
+            onClick={() => fetchOrders(token)}
             className="text-sm text-blue-600 hover:underline"
           >
             Refresh
           </button>
+          <a
+            href={`/admin/orders/api?token=${encodeURIComponent(token)}`}
+            target="_blank"
+            className="text-sm text-gray-600 hover:underline"
+          >
+            Test API (raw)
+          </a>
           <button
             onClick={logout}
             className="text-sm text-red-600 hover:underline"
@@ -135,7 +151,18 @@ export default function AdminOrdersPage() {
         </div>
       </div>
 
-      {error && <p className="text-red-600 mb-3">{error}</p>}
+      {error && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-700 text-sm">
+          <div className="font-semibold mb-1">Error loading orders</div>
+          <div>{error}</div>
+          {lastStatus && <div className="mt-1">HTTP status: {lastStatus}</div>}
+          <div className="mt-2 text-xs text-gray-600">
+            Tip: ensure <code>ADMIN_PASSWORD</code> is set in Vercel (Production)
+            and matches the password you entered. Also confirm <code>DATABASE_URL</code> points
+            to the Neon DB that actually has your orders.
+          </div>
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm border">
@@ -151,7 +178,7 @@ export default function AdminOrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {orders.length === 0 ? (
+            {!error && orders.length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-center p-4 text-gray-500">
                   No orders found.
