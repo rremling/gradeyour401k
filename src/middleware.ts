@@ -1,15 +1,23 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
-  // Redirect /grade/result -> /grade/results (preserve querystring)
-  if (req.nextUrl.pathname === "/grade/result") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/grade/results"; // keep search params
-    return NextResponse.redirect(url, 308);
+  const { pathname } = req.nextUrl;
+
+  // Only guard /admin pages (but not /admin/login itself)
+  if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
+    const hasSession = req.cookies.get("admin_session")?.value === "ok";
+    if (!hasSession) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/admin/login";
+      url.searchParams.set("returnTo", pathname);
+      return NextResponse.redirect(url);
+    }
   }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/grade/result"],
+  matcher: ["/admin/:path*"],
 };
