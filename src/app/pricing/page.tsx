@@ -95,7 +95,7 @@ function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
 }
 /* ---------------------- pricing + checkout logic (unchanged) ---------------------- */
 const ONE_TIME_PRICE_USD = Number(process.env.NEXT_PUBLIC_PRICE_ONE_TIME || 79);
-const ANNUAL_PRICE_USD = Number(process.env.NEXT_PUBLIC_PRICE_ANNUAL || 149);
+const ANNUAL_PRICE_USD = Number(process.env.NEXT_PUBLIC_PRICE_ANNUAL || 199);
 
 type PlanKey = "one_time" | "annual";
 type PromoInfo = {
