@@ -46,7 +46,7 @@ export async function POST(req: Request) {
       mode: planKey === "annual" ? "subscription" : "payment",
       line_items: [{ price, quantity: 1 }],
       // IMPORTANT: use sessionId (camelCase) to match your report API
-      success_url: `${base}/success?sessionId={CHECKOUT_SESSION_ID}`,
+      success_url: `${base}/success?session_Id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${base}/pricing`,
       // IMPORTANT: use snake_case to match your webhook reader
       metadata: { plan_key: planKey, preview_id: previewId },
