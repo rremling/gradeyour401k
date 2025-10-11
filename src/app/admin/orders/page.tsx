@@ -15,9 +15,12 @@ type Order = {
 };
 
 export default function AdminOrdersPage() {
-  // --- Auth token ---
+  // --- Auth token (stored) ---
   const [token, setToken] = useState("");
   const [hasToken, setHasToken] = useState(false);
+
+  // Separate input field so we can clear it after login
+  const [tokenInput, setTokenInput] = useState("");
 
   // --- Data ---
   const [orders, setOrders] = useState<Order[] | null>(null);
@@ -35,16 +38,30 @@ export default function AdminOrdersPage() {
   const [resent, setResent] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    const t = localStorage.getItem("gy4k_admin_token") || "";
-    if (t) {
-      setToken(t);
+    const saved = localStorage.getItem("gy4k_admin_token") || "";
+    if (saved) {
+      setToken(saved);
       setHasToken(true);
+      setTokenInput(""); // clear the visible box
     }
   }, []);
 
-  function saveToken(v: string) {
-    setToken(v);
-    localStorage.setItem("gy4k_admin_token", v);
+  function signIn() {
+    const t = tokenInput.trim();
+    if (!t) return;
+    setToken(t);
+    localStorage.setItem("gy4k_admin_token", t);
+    setHasToken(true);
+    setTokenInput(""); // clear after login
+  }
+
+  function logout() {
+    localStorage.removeItem("gy4k_admin_token");
+    setToken("");
+    setHasToken(false);
+    setOrders(null);
+    setErr(null);
+    setResent({});
   }
 
   async function loadOrders() {
@@ -93,33 +110,33 @@ export default function AdminOrdersPage() {
     [compact]
   );
 
-  // --- If no token set yet, show a centered login card ---
-  if (!hasToken && !token) {
+  // --- Centered Admin login card ---
+  if (!hasToken) {
     return (
-      <main className="mx-auto max-w-lg p-6">
-        <div className="rounded-2xl border bg-white p-6 shadow-sm">
-          <h1 className="text-xl font-semibold">Admin · Sign In</h1>
-          <p className="mt-2 text-sm text-gray-600">
+      <main className="mx-auto max-w-lg p-6 flex items-center justify-center min-h-[60vh]">
+        <div className="rounded-2xl border bg-white p-6 shadow-sm w-full">
+          <h1 className="text-2xl font-bold text-center">Admin login</h1>
+          <p className="mt-2 text-sm text-gray-600 text-center">
             Paste your admin token to continue.
           </p>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-5 flex gap-2">
             <input
               className="border rounded-md p-2 flex-1"
               type="password"
               placeholder="ADMIN_TOKEN"
-              value={token}
-              onChange={(e) => saveToken(e.target.value)}
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
             />
             <button
-              onClick={() => setHasToken(true)}
+              onClick={signIn}
               className="rounded-md bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
-              disabled={!token.trim()}
+              disabled={!tokenInput.trim()}
             >
               Continue
             </button>
           </div>
-          <p className="mt-2 text-xs text-gray-500">
-            This token is stored locally in your browser only.
+          <p className="mt-2 text-xs text-gray-500 text-center">
+            Stored locally in your browser only.
           </p>
         </div>
       </main>
@@ -138,24 +155,23 @@ export default function AdminOrdersPage() {
             </p>
           </div>
 
-          <div className="flex-1">
-            <label className="text-sm font-medium">Admin Token</label>
-            <div className="mt-1 flex gap-2">
-              <input
-                className="border rounded-md p-2 flex-1"
-                type="password"
-                placeholder="ADMIN_TOKEN"
-                value={token}
-                onChange={(e) => saveToken(e.target.value)}
-              />
-              <button
-                onClick={loadOrders}
-                className="rounded-md bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
-                disabled={loading || !token.trim()}
-              >
-                {loading ? "Loading…" : "Refresh"}
-              </button>
-            </div>
+          {/* Controls: Refresh + Logout */}
+          <div className="flex items-end gap-2">
+            <button
+              onClick={loadOrders}
+              className="rounded-md bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
+              disabled={loading}
+              title="Refresh orders"
+            >
+              {loading ? "Loading…" : "Refresh"}
+            </button>
+            <button
+              onClick={logout}
+              className="rounded-md border px-4 py-2 hover:bg-gray-50"
+              title="Sign out"
+            >
+              Logout
+            </button>
           </div>
         </div>
 
@@ -224,7 +240,7 @@ export default function AdminOrdersPage() {
       {/* Orders table */}
       <div className="rounded-2xl border bg-white p-4 shadow-sm">
         {orders === null ? (
-          <p className="text-sm text-gray-600">No data yet. Click “Refresh”.</p>
+          <p className="text-sm text-gray-600">No data yet. Tap “Refresh”.</p>
         ) : orders.length === 0 ? (
           <p className="text-sm text-gray-600">No orders found.</p>
         ) : (
@@ -290,7 +306,6 @@ export default function AdminOrdersPage() {
               </tbody>
             </table>
 
-            {/* Small helper on mobile */}
             <p className="mt-2 text-[11px] text-gray-500">
               Tip: On mobile, scroll horizontally. Use “Columns” to hide fields.
             </p>
