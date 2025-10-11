@@ -3,10 +3,10 @@ import { useEffect, useState } from "react";
 
 type Order = {
   id: number;
-  email: string;
-  plan_key: string;
-  status: string;
-  preview_id: string;
+  email: string | null;
+  plan_key: string | null;
+  status: string | null;
+  preview_id: string | null;
   stripe_session_id: string;
   created_at: string;
 };
@@ -16,6 +16,8 @@ export default function AdminOrdersPage() {
   const [token, setToken] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<number | null>(null);
+  const [rowMsg, setRowMsg] = useState<Record<number, string>>({});
 
   async function fetchOrders(authToken: string) {
     setError(null);
@@ -52,6 +54,45 @@ export default function AdminOrdersPage() {
       fetchOrders(saved);
     }
   }, []);
+
+  async function resendFor(order: Order) {
+    if (!token) return;
+    setRowMsg((m) => ({ ...m, [order.id]: "" }));
+    setSendingId(order.id);
+
+    try {
+      // This endpoint should already exist in your app:
+      // /api/report/generate-and-email
+      // It supports POST with any of: previewId, sessionId, or email
+      const res = await fetch("/api/report/generate-and-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`, // optional; your endpoint can ignore this
+        },
+        body: JSON.stringify({
+          // Provide as many identifiers as possible:
+          previewId: order.preview_id || undefined,
+          sessionId: order.stripe_session_id,
+          email: order.email || undefined,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          data?.error ||
+            `Resend failed (HTTP ${res.status})`
+        );
+      }
+      setRowMsg((m) => ({ ...m, [order.id]: "Resent! Check the inbox." }));
+    } catch (e: any) {
+      console.error("Resend error:", e);
+      setRowMsg((m) => ({ ...m, [order.id]: e?.message || "Resend failed" }));
+    } finally {
+      setSendingId(null);
+    }
+  }
 
   if (!token) {
     return (
@@ -106,26 +147,45 @@ export default function AdminOrdersPage() {
               <th className="p-2 text-left">Status</th>
               <th className="p-2 text-left">Preview ID</th>
               <th className="p-2 text-left">Stripe Session</th>
+              <th className="p-2 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
             {orders.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center p-4 text-gray-500">
+                <td colSpan={7} className="text-center p-4 text-gray-500">
                   No orders found.
                 </td>
               </tr>
             ) : (
               orders.map((o) => (
-                <tr key={o.id} className="border-t">
+                <tr key={o.id} className="border-t align-top">
                   <td className="p-2">
                     {new Date(o.created_at).toLocaleString()}
                   </td>
                   <td className="p-2">{o.email || "—"}</td>
-                  <td className="p-2">{o.plan_key}</td>
-                  <td className="p-2">{o.status}</td>
+                  <td className="p-2">{o.plan_key || "—"}</td>
+                  <td className="p-2">{o.status || "—"}</td>
                   <td className="p-2">{o.preview_id || "—"}</td>
-                  <td className="p-2 font-mono text-xs">{o.stripe_session_id}</td>
+                  <td className="p-2 font-mono text-xs break-all">
+                    {o.stripe_session_id}
+                  </td>
+                  <td className="p-2">
+                    <button
+                      disabled={sendingId === o.id}
+                      onClick={() => resendFor(o)}
+                      className="rounded-md border px-3 py-1 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {sendingId === o.id ? "Sending…" : "Resend"}
+                    </button>
+                    {rowMsg[o.id] && (
+                      <div className="text-xs mt-1">
+                        {rowMsg[o.id].includes("Resent")
+                          ? <span className="text-green-700">{rowMsg[o.id]}</span>
+                          : <span className="text-red-700">{rowMsg[o.id]}</span>}
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))
             )}
