@@ -1,119 +1,73 @@
 // src/app/api/checkout/route.ts
-// Creates a Stripe Checkout session for one-time or annual.
-// Needs env in Vercel (Production):
-// - STRIPE_SECRET_KEY = sk_live_...
-// - STRIPE_PRICE_ID_ONE_TIME = price_.... (one-time)
-// - STRIPE_PRICE_ID_ANNUAL = price_.... (recurring)
-// (Optional) NEXT_PUBLIC_SITE_URL if you host behind a proxy/domain.
-
+import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20",
+});
 
-type Body = {
-  planKey: "one_time" | "annual";
-  previewId?: string | null;
-  promotionCodeId?: string | null; // Stripe Promotion Code id (not the code text)
-};
+const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!;
+const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
 
-// Helper to get absolute site origin (fallback to Vercel URL headers if needed)
-function getOrigin(req: Request): string {
-  // Honor NEXT_PUBLIC_SITE_URL if you set it
-  const envUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  if (envUrl) return envUrl.replace(/\/$/, "");
+/** Get a fully-qualified base URL with scheme */
+function getBaseUrl(req: Request): string {
+  // Preferred: explicit base URL set in env, must include scheme
+  const explicit = process.env.NEXT_PUBLIC_BASE_URL;
+  if (explicit && /^https?:\/\//i.test(explicit)) return explicit.replace(/\/+$/, "");
 
-  // Otherwise derive from request headers
-  const url = new URL(req.url);
-  const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
-  return `${proto}://${host}`;
+  // Vercel provides a host without scheme; add https://
+  const vercelHost = process.env.VERCEL_URL; // e.g. "www.gradeyour401k.com"
+  if (vercelHost) return `https://${vercelHost.replace(/\/+$/, "")}`;
+
+  // Fallback to request origin (works locally)
+  try {
+    const u = new URL(req.url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    // Last resort
+    return "http://localhost:3000";
+  }
 }
 
 export async function POST(req: Request) {
   try {
-    const stripeSecret = process.env.STRIPE_SECRET_KEY;
-    if (!stripeSecret) {
-      return new Response(
-        JSON.stringify({ error: "Missing STRIPE_SECRET_KEY" }),
-        { status: 500, headers: { "content-type": "application/json" } }
-      );
-    }
-    const stripe = new Stripe(stripeSecret, {
-      apiVersion: "2024-06-20",
-    });
+    const body = await req.json();
+    const planKey = body.planKey as "one_time" | "annual";
+    const previewId = String(body.previewId || "");
+    const promotionCodeId = body.promotionCodeId as string | undefined;
 
-    const body = (await req.json()) as Body;
-
-    const planKey = body.planKey;
-    const previewId = (body.previewId || "").toString();
-    const promotionCodeId = body.promotionCodeId || undefined;
-
-    if (!planKey || (planKey !== "one_time" && planKey !== "annual")) {
-      return new Response(JSON.stringify({ error: "Invalid planKey" }), {
-        status: 400,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    if (!previewId) {
-      return new Response(JSON.stringify({ error: "Missing previewId" }), {
-        status: 400,
-        headers: { "content-type": "application/json" },
-      });
+    if (!planKey || !previewId) {
+      return NextResponse.json({ error: "Missing planKey or previewId" }, { status: 400 });
     }
 
-    const priceOneTime = process.env.STRIPE_PRICE_ID_ONE_TIME;
-    const priceAnnual = process.env.STRIPE_PRICE_ID_ANNUAL;
-
-    if (!priceOneTime || !priceAnnual) {
-      return new Response(
-        JSON.stringify({
-          error:
-            "Missing STRIPE_PRICE_ID_ONE_TIME and/or STRIPE_PRICE_ID_ANNUAL env vars",
-        }),
-        { status: 500, headers: { "content-type": "application/json" } }
+    const price = planKey === "annual" ? PRICE_ANNUAL : PRICE_ONE_TIME;
+    if (!price) {
+      return NextResponse.json(
+        { error: `Missing Stripe price for planKey=${planKey}` },
+        { status: 500 }
       );
     }
 
-    const origin = getOrigin(req);
-
-    // Build common options
-    const common: Stripe.Checkout.SessionCreateParams = {
-      mode: planKey === "one_time" ? "payment" : "subscription",
-      line_items: [
-        {
-          price: planKey === "one_time" ? priceOneTime : priceAnnual,
-          quantity: 1,
-        },
-      ],
-      // If we got a specific promotion code id, pass it in `discounts`.
-      // Otherwise, allow user to type codes at checkout.
+    const base = getBaseUrl(req); // <- always includes scheme
+    const params: Stripe.Checkout.SessionCreateParams = {
+      mode: planKey === "annual" ? "subscription" : "payment",
+      line_items: [{ price, quantity: 1 }],
+      success_url: `${base}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${base}/pricing`,
+      metadata: { planKey, previewId },
       ...(promotionCodeId
         ? { discounts: [{ promotion_code: promotionCodeId }] }
         : { allow_promotion_codes: true }),
-
-      // Attach metadata so the webhook can persist order rows
-      metadata: {
-        plan_key: planKey,
-        preview_id: previewId,
-      },
-
-      success_url: `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/pricing`,
+      // Only permitted in payment mode:
+      ...(planKey === "one_time" ? { customer_creation: "always" } : {}),
     };
 
-    const session = await stripe.checkout.sessions.create(common);
-
-    return new Response(JSON.stringify({ url: session.url }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+    const session = await stripe.checkout.sessions.create(params);
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    const msg =
-      err?.message || (typeof err === "string" ? err : "Checkout failed");
-    return new Response(JSON.stringify({ error: msg }), {
-      status: 400,
-      headers: { "content-type": "application/json" },
-    });
+    return NextResponse.json(
+      { error: `Checkout failed: ${err?.message || "unknown"}` },
+      { status: 500 }
+    );
   }
 }
