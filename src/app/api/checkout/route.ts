@@ -2,65 +2,71 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
+export const dynamic = "force-dynamic";
+
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: "2024-06-20",
 });
 
-type Body = {
-  planKey: "one_time" | "annual";
-  previewId: string;
-  promotionCodeId?: string;
-};
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL || "https://www.gradeyour401k.com";
 
-const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!; // e.g. price_...
-const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!; // e.g. price_...
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://www.gradeyour401k.com";
+const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!;
+const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as Body;
+    const { planKey, previewId, promotionCodeId } = await req.json();
 
-    if (!body?.planKey) {
-      return NextResponse.json({ error: "Missing planKey" }, { status: 400 });
-    }
-    if (!body?.previewId) {
-      return NextResponse.json({ error: "Missing previewId" }, { status: 400 });
+    if (!planKey || !previewId) {
+      return NextResponse.json(
+        { error: "Missing planKey or previewId" },
+        { status: 400 }
+      );
     }
 
-    const isOneTime = body.planKey === "one_time";
-    const priceId = isOneTime ? PRICE_ONE_TIME : PRICE_ANNUAL;
+    const priceId =
+      planKey === "annual"
+        ? PRICE_ANNUAL
+        : planKey === "one_time"
+        ? PRICE_ONE_TIME
+        : null;
+
     if (!priceId) {
-      return NextResponse.json({ error: "Price ID not configured" }, { status: 500 });
+      return NextResponse.json({ error: "Invalid planKey" }, { status: 400 });
     }
-
-    // Use payment for one-time, subscription for annual
-    const mode: Stripe.Checkout.SessionCreateParams.Mode = isOneTime ? "payment" : "subscription";
-
-    const discounts: Stripe.Checkout.SessionCreateParams.Discount[] | undefined =
-      body.promotionCodeId ? [{ promotion_code: body.promotionCodeId }] : undefined;
 
     const session = await stripe.checkout.sessions.create({
-      mode,
-      line_items: [{ price: priceId, quantity: 1 }],
+      mode: "payment",
+      payment_method_types: ["card"],
+      allow_promotion_codes: true,
+      discounts: promotionCodeId
+        ? [{ promotion_code: promotionCodeId }]
+        : undefined,
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
       success_url: `${SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${SITE_URL}/pricing?canceled=1`,
-      // ✅ Carry plan & preview so the webhook can store them
+      cancel_url: `${SITE_URL}/pricing`,
       metadata: {
-        plan_key: body.planKey, // <— IMPORTANT
-        preview_id: body.previewId, // <— IMPORTANT
+        plan_key: planKey,
+        preview_id: previewId,
       },
-      // If you need an email later and no customer is created, enable this:
-      customer_creation: isOneTime ? "if_required" : undefined, // only valid in payment mode
-      allow_promotion_codes: !body.promotionCodeId ? true : undefined,
-      discounts,
     });
 
     return NextResponse.json({ url: session.url }, { status: 200 });
   } catch (err: any) {
+    console.error("[checkout] failed:", err);
     return NextResponse.json(
-      { error: `Checkout failed: ${err?.message || "unknown"}` },
+      { error: "Checkout failed. " + (err.message || "") },
       { status: 500 }
     );
   }
+}
+
+export async function GET() {
+  return NextResponse.json({ ok: true, endpoint: "checkout" });
 }
