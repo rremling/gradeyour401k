@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 // ---- Stepper (mobile-friendly) ----
-function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
+function Stepper({ current = 3 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
     { n: 2, label: "Review" },
