@@ -1,72 +1,73 @@
 // src/app/api/checkout/route.ts
+import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { NextRequest } from "next/server";
 
-export const dynamic = "force-dynamic";
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: "2024-06-20",
+});
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
-const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME || ""; // e.g. price_live_...
-const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL || ""; // e.g. price_live_...
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://www.gradeyour401k.com";
+const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!;
+const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
 
-if (!STRIPE_SECRET_KEY) console.warn("[checkout] Missing STRIPE_SECRET_KEY");
-if (!PRICE_ONE_TIME) console.warn("[checkout] Missing STRIPE_PRICE_ID_ONE_TIME");
-if (!PRICE_ANNUAL) console.warn("[checkout] Missing STRIPE_PRICE_ID_ANNUAL");
+/** Get a fully-qualified base URL with scheme */
+function getBaseUrl(req: Request): string {
+  // Preferred: explicit base URL set in env, must include scheme
+  const explicit = process.env.NEXT_PUBLIC_BASE_URL;
+  if (explicit && /^https?:\/\//i.test(explicit)) return explicit.replace(/\/+$/, "");
 
-const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+  // Vercel provides a host without scheme; add https://
+  const vercelHost = process.env.VERCEL_URL; // e.g. "www.gradeyour401k.com"
+  if (vercelHost) return `https://${vercelHost.replace(/\/+$/, "")}`;
 
-type Body = {
-  planKey?: "one_time" | "annual";
-  previewId?: string;
-  promotionCodeId?: string; // optional, pre-validated on pricing page
-};
-
-export async function POST(req: NextRequest) {
+  // Fallback to request origin (works locally)
   try {
-    const body = (await req.json()) as Body;
+    const u = new URL(req.url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    // Last resort
+    return "http://localhost:3000";
+  }
+}
 
-    // Validate required fields
-    const planKey = body.planKey;
-    const previewId = (body.previewId || "").trim();
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const planKey = body.planKey as "one_time" | "annual";
+    const previewId = String(body.previewId || "");
+    const promotionCodeId = body.promotionCodeId as string | undefined;
 
-    if (!planKey || !["one_time", "annual"].includes(planKey)) {
-      return Response.json({ error: "Missing or invalid planKey" }, { status: 400 });
+    if (!planKey || !previewId) {
+      return NextResponse.json({ error: "Missing planKey or previewId" }, { status: 400 });
     }
-    if (!previewId) {
-      return Response.json({ error: "Missing previewId (save your grade first)" }, { status: 400 });
-    }
 
-    const mode = planKey === "annual" ? "subscription" : "payment";
     const price = planKey === "annual" ? PRICE_ANNUAL : PRICE_ONE_TIME;
-
     if (!price) {
-      return Response.json({ error: "Price ID not configured for this plan" }, { status: 500 });
+      return NextResponse.json(
+        { error: `Missing Stripe price for planKey=${planKey}` },
+        { status: 500 }
+      );
     }
 
-    // Optional promotion code
-    const discounts =
-      body.promotionCodeId ? [{ promotion_code: body.promotionCodeId }] : undefined;
-
-    const session = await stripe.checkout.sessions.create({
-      mode,
+    const base = getBaseUrl(req); // <- always includes scheme
+    const params: Stripe.Checkout.SessionCreateParams = {
+      mode: planKey === "annual" ? "subscription" : "payment",
       line_items: [{ price, quantity: 1 }],
-      discounts, // use either discounts OR allow_promotion_codes (not both)
-      allow_promotion_codes: !discounts, // allow manual entry if none was pre-applied
-      success_url: `${SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${SITE_URL}/pricing`,
-      // CRITICAL: include the metadata your webhook expects
-      metadata: {
-        plan_key: planKey, // "one_time" | "annual"
-        preview_id: previewId, // saved grade id (localStorage -> pricing -> here)
-      },
-      // Optional: collect the email on Stripe Checkout
-      customer_creation: mode === "payment" ? "always" : undefined, // payment-only
-      // If you’re doing subscriptions, customer_creation is not allowed; omit for annual
-    });
+      success_url: `${base}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${base}/pricing`,
+      metadata: { planKey, previewId },
+      ...(promotionCodeId
+        ? { discounts: [{ promotion_code: promotionCodeId }] }
+        : { allow_promotion_codes: true }),
+      // Only permitted in payment mode:
+      ...(planKey === "one_time" ? { customer_creation: "always" } : {}),
+    };
 
-    return Response.json({ url: session.url }, { status: 200 });
+    const session = await stripe.checkout.sessions.create(params);
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error("[checkout] error:", err?.message || err);
-    return Response.json({ error: "Checkout failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: `Checkout failed: ${err?.message || "unknown"}` },
+      { status: 500 }
+    );
   }
 }
