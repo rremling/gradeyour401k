@@ -4,7 +4,20 @@ import { sql } from "../../../../lib/db"; // adjust if your path differs
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { Resend } from "resend";
 
-/** Build a very simple PDF buffer describing the preview */
+type PreviewRow = {
+  id: string;
+  provider: string | null;
+  provider_display: string | null;
+  profile: string | null;
+  rows: any;
+  grade_base: number | null;
+  grade_adjusted: number | null;
+};
+
+type OrderRow = {
+  email: string | null;
+};
+
 async function buildPdf(opts: {
   provider: string;
   profile: string;
@@ -12,7 +25,7 @@ async function buildPdf(opts: {
   holdings: { symbol: string; weight: number }[];
 }) {
   const doc = await PDFDocument.create();
-  const page = doc.addPage([612, 792]); // Letter
+  const page = doc.addPage([612, 792]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
 
   const margin = 50;
@@ -23,7 +36,6 @@ async function buildPdf(opts: {
     y -= size + 6;
   };
 
-  // Title
   draw("GradeYour401k — Preliminary Report", 18);
   draw(`Provider: ${opts.provider}`, 12);
   draw(`Profile: ${opts.profile}`, 12);
@@ -94,27 +106,34 @@ async function sendEmailWithPdf(params: {
   if (error) throw new Error(`Resend error: ${error.message || String(error)}`);
 }
 
-type PreviewRow = {
-  id: string;
-  provider: string | null;
-  provider_display: string | null;
-  profile: string | null;
-  rows: any; // JSON array of {symbol, weight}
-  grade_base: number | null;
-  grade_adjusted: number | null;
-};
-
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const email = String(body?.email || "").trim();
     const previewId = String(body?.previewId || "").trim();
+    let email = String(body?.email || "").trim();
 
-    if (!email) {
-      return NextResponse.json({ error: "Missing destination email" }, { status: 400 });
-    }
     if (!previewId) {
       return NextResponse.json({ error: "Missing previewId" }, { status: 400 });
+    }
+
+    // If email missing, try to infer from the latest PAID order for this preview
+    if (!email) {
+      const o = await sql<OrderRow>`
+        SELECT email
+        FROM public.orders
+        WHERE preview_id::text = ${previewId} AND status = 'paid'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `;
+      const candidate = o.rows?.[0]?.email?.trim();
+      if (candidate) email = candidate;
+    }
+
+    if (!email) {
+      return NextResponse.json(
+        { error: "Missing destination email (no order email found)" },
+        { status: 400 }
+      );
     }
 
     // Load preview
@@ -142,7 +161,7 @@ export async function POST(req: Request) {
         : null;
     const grade = gradeNum !== null ? gradeNum.toFixed(1) : "—";
 
-    // Normalize holdings array
+    // Normalize holdings
     let holdings: { symbol: string; weight: number }[] = [];
     try {
       const raw = p.rows;
@@ -173,7 +192,7 @@ export async function POST(req: Request) {
   }
 }
 
-// Simple health check
+// Health check
 export async function GET() {
   return NextResponse.json({ ok: true, method: "GET" });
 }
