@@ -1,6 +1,6 @@
 // src/app/api/report/generate-and-email/route.ts
 import { NextResponse } from "next/server";
-import { sql } from "../../../../lib/db"; // adjust if your path differs
+import { sql } from "../../../../lib/db"; // adjust if needed
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { Resend } from "resend";
 
@@ -16,6 +16,9 @@ type PreviewRow = {
 
 type OrderRow = {
   email: string | null;
+  preview_id: string | null;
+  status: string | null;
+  created_at: string | null;
 };
 
 async function buildPdf(opts: {
@@ -51,8 +54,8 @@ async function buildPdf(opts: {
     });
   }
 
-  const pdfBytes = await doc.save();
-  return Buffer.from(pdfBytes);
+  const bytes = await doc.save();
+  return Buffer.from(bytes);
 }
 
 async function sendEmailWithPdf(params: {
@@ -68,67 +71,90 @@ async function sendEmailWithPdf(params: {
   if (!FROM_EMAIL) throw new Error("Missing FROM_EMAIL");
 
   const resend = new Resend(RESEND_API_KEY);
-
-  const pdf = await buildPdf({
-    provider: params.provider,
-    profile: params.profile,
-    grade: params.grade,
-    holdings: params.holdings,
-  });
-
-  const subject = `Your GradeYour401k report`;
-  const html = `
-    <div style="font-family:Arial, sans-serif; line-height:1.5">
-      <p>Thanks for using GradeYour401k!</p>
-      <p>Your preliminary PDF is attached.</p>
-      <ul>
-        <li><strong>Provider:</strong> ${params.provider}</li>
-        <li><strong>Profile:</strong> ${params.profile}</li>
-        <li><strong>Grade:</strong> ${params.grade} / 5</li>
-      </ul>
-      <p>If you didn’t request this report, you can ignore this email.</p>
-    </div>
-  `;
+  const pdf = await buildPdf(params);
 
   const { error } = await resend.emails.send({
     from: FROM_EMAIL,
     to: params.to,
-    subject,
-    html,
-    attachments: [
-      {
-        filename: "GradeYour401k_Report.pdf",
-        content: pdf.toString("base64"),
-      },
-    ],
+    subject: "Your GradeYour401k report",
+    html: `
+      <div style="font-family:Arial, sans-serif; line-height:1.5">
+        <p>Thanks for using GradeYour401k!</p>
+        <p>Your preliminary PDF is attached.</p>
+        <ul>
+          <li><strong>Provider:</strong> ${params.provider}</li>
+          <li><strong>Profile:</strong> ${params.profile}</li>
+          <li><strong>Grade:</strong> ${params.grade} / 5</li>
+        </ul>
+      </div>
+    `,
+    attachments: [{ filename: "GradeYour401k_Report.pdf", content: pdf.toString("base64") }],
   });
 
   if (error) throw new Error(`Resend error: ${error.message || String(error)}`);
 }
 
+async function resolveFromSession(sessionId: string) {
+  const r = await sql<OrderRow>`
+    SELECT email, preview_id, status, created_at
+    FROM public.orders
+    WHERE stripe_session_id = ${sessionId}
+    LIMIT 1
+  `;
+  return r.rows?.[0] || null;
+}
+
+async function latestPaidOrderByEmail(email: string) {
+  const r = await sql<OrderRow>`
+    SELECT email, preview_id, status, created_at
+    FROM public.orders
+    WHERE email = ${email} AND status = 'paid'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return r.rows?.[0] || null;
+}
+
+async function latestPaidOrderByPreview(previewId: string) {
+  const r = await sql<OrderRow>`
+    SELECT email, preview_id, status, created_at
+    FROM public.orders
+    WHERE preview_id::text = ${previewId} AND status = 'paid'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return r.rows?.[0] || null;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
-    const previewId = String(body?.previewId || "").trim();
+    let previewId = String(body?.previewId || "").trim();
     let email = String(body?.email || "").trim();
+    const sessionId = String(body?.sessionId || "").trim();
+
+    // 1) If no previewId but we got a sessionId, resolve via that order
+    if (!previewId && sessionId) {
+      const ord = await resolveFromSession(sessionId);
+      if (ord?.preview_id) previewId = String(ord.preview_id);
+      if (!email && ord?.email) email = ord.email.trim();
+    }
+
+    // 2) If still no previewId but we have an email, use latest paid order for that email
+    if (!previewId && email) {
+      const ord = await latestPaidOrderByEmail(email);
+      if (ord?.preview_id) previewId = String(ord.preview_id);
+    }
+
+    // 3) If we have previewId but no email, fetch latest paid order for that preview
+    if (previewId && !email) {
+      const ord = await latestPaidOrderByPreview(previewId);
+      if (ord?.email) email = ord.email.trim();
+    }
 
     if (!previewId) {
       return NextResponse.json({ error: "Missing previewId" }, { status: 400 });
     }
-
-    // If email missing, try to infer from the latest PAID order for this preview
-    if (!email) {
-      const o = await sql<OrderRow>`
-        SELECT email
-        FROM public.orders
-        WHERE preview_id::text = ${previewId} AND status = 'paid'
-        ORDER BY created_at DESC
-        LIMIT 1
-      `;
-      const candidate = o.rows?.[0]?.email?.trim();
-      if (candidate) email = candidate;
-    }
-
     if (!email) {
       return NextResponse.json(
         { error: "Missing destination email (no order email found)" },
@@ -137,18 +163,15 @@ export async function POST(req: Request) {
     }
 
     // Load preview
-    const r = await sql<PreviewRow>`
+    const pr = await sql<PreviewRow>`
       SELECT id, provider, provider_display, profile, "rows", grade_base, grade_adjusted
       FROM public.previews
       WHERE id::text = ${previewId}
       LIMIT 1
     `;
-    const p = r.rows?.[0];
+    const p = pr.rows?.[0];
     if (!p) {
-      return NextResponse.json(
-        { error: `Preview not found for id ${previewId}` },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: `Preview not found for id ${previewId}` }, { status: 404 });
     }
 
     const providerDisplay = p.provider_display || p.provider || "—";
@@ -161,7 +184,6 @@ export async function POST(req: Request) {
         : null;
     const grade = gradeNum !== null ? gradeNum.toFixed(1) : "—";
 
-    // Normalize holdings
     let holdings: { symbol: string; weight: number }[] = [];
     try {
       const raw = p.rows;
@@ -174,15 +196,8 @@ export async function POST(req: Request) {
       holdings = [];
     }
 
-    await sendEmailWithPdf({
-      to: email,
-      provider: providerDisplay,
-      profile,
-      grade,
-      holdings,
-    });
-
-    return NextResponse.json({ ok: true });
+    await sendEmailWithPdf({ to: email, provider: providerDisplay, profile, grade, holdings });
+    return NextResponse.json({ ok: true, previewId, email });
   } catch (err: any) {
     console.error("[report generate-and-email] error:", err);
     return NextResponse.json(
