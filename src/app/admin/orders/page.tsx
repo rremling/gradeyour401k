@@ -1,223 +1,146 @@
+// src/app/admin/orders/page.tsx
 "use client";
+
 import { useEffect, useState } from "react";
 
 type Order = {
-  id: number;
+  id: string;
   email: string | null;
   plan_key: string | null;
   status: string | null;
   preview_id: string | null;
-  stripe_session_id: string;
+  stripe_session_id: string | null;
   created_at: string;
+  next_due_1: string | null;
 };
 
 export default function AdminOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [token, setToken] = useState<string | null>(null);
-  const [input, setInput] = useState("");
+  const [token, setToken] = useState("");
+  const [orders, setOrders] = useState<Order[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sendingId, setSendingId] = useState<number | null>(null);
-  const [rowMsg, setRowMsg] = useState<Record<number, string>>({});
-  const [lastStatus, setLastStatus] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  async function fetchOrders(authToken: string) {
-    setError(null);
-    setLastStatus(null);
-    try {
-      // Send token both ways (header + query param) to simplify proxy/debugging
-      const res = await fetch(`/admin/orders/api?token=${encodeURIComponent(authToken)}`, {
-        headers: { Authorization: `Bearer ${authToken}` },
-        cache: "no-store",
-      });
-      setLastStatus(res.status);
-
-      const text = await res.text();
-      let data: any;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(`Non-JSON response (HTTP ${res.status}): ${text.slice(0, 200)}`);
-      }
-
-      if (!res.ok) {
-        throw new Error(data?.error || `HTTP ${res.status}`);
-      }
-
-      setOrders(data.orders || []);
-    } catch (err: any) {
-      console.error("Fetch failed:", err);
-      setOrders([]);
-      setError(err.message || "Failed to load orders");
-    }
-  }
-
-  function handleLogin() {
-    setToken(input);
-    localStorage.setItem("admin_token", input);
-    fetchOrders(input);
-  }
-
-  function logout() {
-    setToken(null);
-    localStorage.removeItem("admin_token");
-    setOrders([]);
-  }
-
+  // load saved token
   useEffect(() => {
-    const saved = localStorage.getItem("admin_token");
-    if (saved) {
-      setToken(saved);
-      fetchOrders(saved);
-    }
+    const t = localStorage.getItem("gy4k_admin_token") || "";
+    setToken(t);
   }, []);
 
-  async function resendFor(order: Order) {
-    if (!token) return;
-    setRowMsg((m) => ({ ...m, [order.id]: "" }));
-    setSendingId(order.id);
+  async function load() {
+    setError(null);
+    setLoading(true);
+    setOrders(null);
+    try {
+      const res = await fetch("/api/admin/orders", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(`${data?.error || res.statusText} (http ${res.status})`);
+      }
+      setOrders(data.orders || []);
+    } catch (e: any) {
+      setError(e?.message || "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }
 
+  function saveToken(v: string) {
+    setToken(v);
+    localStorage.setItem("gy4k_admin_token", v);
+  }
+
+  async function resend(previewId: string | null, email: string | null) {
+    setError(null);
+    if (!previewId) {
+      setError("Missing preview_id for this order.");
+      return;
+    }
     try {
       const res = await fetch("/api/report/generate-and-email", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`, // optional
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
-          previewId: order.preview_id || undefined,
-          sessionId: order.stripe_session_id,
-          email: order.email || undefined,
-        }),
+        body: JSON.stringify({ previewId }),
       });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || `Resend failed (HTTP ${res.status})`);
-      }
-      setRowMsg((m) => ({ ...m, [order.id]: "Resent! Check the inbox." }));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Resend failed");
+      alert("Report re-sent!");
     } catch (e: any) {
-      console.error("Resend error:", e);
-      setRowMsg((m) => ({ ...m, [order.id]: e?.message || "Resend failed" }));
-    } finally {
-      setSendingId(null);
+      setError(e?.message || "Resend failed");
     }
   }
 
-  if (!token) {
-    return (
-      <main className="mx-auto max-w-md p-6 space-y-4">
-        <h1 className="text-2xl font-bold">Admin Login</h1>
-        <input
-          type="password"
-          className="w-full border rounded-md p-2"
-          placeholder="Enter admin password"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
-        <button
-          className="rounded-md bg-blue-600 text-white px-4 py-2 w-full"
-          onClick={handleLogin}
-        >
-          Login
-        </button>
-      </main>
-    );
-  }
-
   return (
-    <main className="mx-auto max-w-5xl p-6 space-y-4">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Admin Orders</h1>
-        <div className="flex gap-3 items-center">
+    <main className="mx-auto max-w-5xl p-6 space-y-6">
+      <h1 className="text-2xl font-bold">Admin · Orders</h1>
+
+      <div className="rounded border p-4 bg-white space-y-3">
+        <label className="text-sm font-medium">Admin Token</label>
+        <div className="flex gap-2">
+          <input
+            className="border rounded p-2 flex-1"
+            type="password"
+            placeholder="Paste ADMIN_TOKEN"
+            value={token}
+            onChange={(e) => saveToken(e.target.value)}
+          />
           <button
-            onClick={() => fetchOrders(token)}
-            className="text-sm text-blue-600 hover:underline"
+            onClick={load}
+            className="rounded bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
+            disabled={loading}
           >
-            Refresh
-          </button>
-          <a
-            href={`/admin/orders/api?token=${encodeURIComponent(token)}`}
-            target="_blank"
-            className="text-sm text-gray-600 hover:underline"
-          >
-            Test API (raw)
-          </a>
-          <button
-            onClick={logout}
-            className="text-sm text-red-600 hover:underline"
-          >
-            Logout
+            {loading ? "Loading…" : "Refresh"}
           </button>
         </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
 
-      {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-700 text-sm">
-          <div className="font-semibold mb-1">Error loading orders</div>
-          <div>{error}</div>
-          {lastStatus && <div className="mt-1">HTTP status: {lastStatus}</div>}
-          <div className="mt-2 text-xs text-gray-600">
-            Tip: ensure <code>ADMIN_PASSWORD</code> is set in Vercel (Production)
-            and matches the password you entered. Also confirm <code>DATABASE_URL</code> points
-            to the Neon DB that actually has your orders.
-          </div>
-        </div>
-      )}
-
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm border">
-          <thead className="bg-gray-100 border-b">
-            <tr>
-              <th className="p-2 text-left">Date</th>
-              <th className="p-2 text-left">Email</th>
-              <th className="p-2 text-left">Plan</th>
-              <th className="p-2 text-left">Status</th>
-              <th className="p-2 text-left">Preview ID</th>
-              <th className="p-2 text-left">Stripe Session</th>
-              <th className="p-2 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!error && orders.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="text-center p-4 text-gray-500">
-                  No orders found.
-                </td>
-              </tr>
-            ) : (
-              orders.map((o) => (
-                <tr key={o.id} className="border-t align-top">
-                  <td className="p-2">
-                    {new Date(o.created_at).toLocaleString()}
-                  </td>
-                  <td className="p-2">{o.email || "—"}</td>
-                  <td className="p-2">{o.plan_key || "—"}</td>
-                  <td className="p-2">{o.status || "—"}</td>
-                  <td className="p-2">{o.preview_id || "—"}</td>
-                  <td className="p-2 font-mono text-xs break-all">
-                    {o.stripe_session_id}
-                  </td>
-                  <td className="p-2">
-                    <button
-                      disabled={sendingId === o.id}
-                      onClick={() => resendFor(o)}
-                      className="rounded-md border px-3 py-1 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {sendingId === o.id ? "Sending…" : "Resend"}
-                    </button>
-                    {rowMsg[o.id] && (
-                      <div className="text-xs mt-1">
-                        {rowMsg[o.id].includes("Resent")
-                          ? <span className="text-green-700">{rowMsg[o.id]}</span>
-                          : <span className="text-red-700">{rowMsg[o.id]}</span>}
-                      </div>
-                    )}
-                  </td>
+      <div className="rounded border p-4 bg-white">
+        {orders === null ? (
+          <p className="text-sm text-gray-600">No data yet. Click Refresh.</p>
+        ) : orders.length === 0 ? (
+          <p className="text-sm text-gray-600">No orders found.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="py-2 pr-4">Created</th>
+                  <th className="py-2 pr-4">Email</th>
+                  <th className="py-2 pr-4">Plan</th>
+                  <th className="py-2 pr-4">Status</th>
+                  <th className="py-2 pr-4">Preview ID</th>
+                  <th className="py-2 pr-4">Session</th>
+                  <th className="py-2 pr-4">Actions</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {orders.map((o) => (
+                  <tr key={o.id} className="border-b">
+                    <td className="py-2 pr-4">{new Date(o.created_at).toLocaleString()}</td>
+                    <td className="py-2 pr-4">{o.email || "—"}</td>
+                    <td className="py-2 pr-4">{o.plan_key || "—"}</td>
+                    <td className="py-2 pr-4">{o.status || "—"}</td>
+                    <td className="py-2 pr-4">{o.preview_id || "—"}</td>
+                    <td className="py-2 pr-4">{o.stripe_session_id || "—"}</td>
+                    <td className="py-2 pr-4">
+                      <button
+                        className="rounded border px-3 py-1 hover:bg-gray-50"
+                        onClick={() => resend(o.preview_id, o.email)}
+                      >
+                        Re-send
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </main>
   );
