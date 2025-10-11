@@ -11,22 +11,14 @@ const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
 
 /** Get a fully-qualified base URL with scheme */
 function getBaseUrl(req: Request): string {
-  // Preferred: explicit base URL set in env, must include scheme
   const explicit = process.env.NEXT_PUBLIC_BASE_URL;
   if (explicit && /^https?:\/\//i.test(explicit)) return explicit.replace(/\/+$/, "");
 
-  // Vercel provides a host without scheme; add https://
   const vercelHost = process.env.VERCEL_URL; // e.g. "www.gradeyour401k.com"
   if (vercelHost) return `https://${vercelHost.replace(/\/+$/, "")}`;
 
-  // Fallback to request origin (works locally)
-  try {
-    const u = new URL(req.url);
-    return `${u.protocol}//${u.host}`;
-  } catch {
-    // Last resort
-    return "http://localhost:3000";
-  }
+  const u = new URL(req.url);
+  return `${u.protocol}//${u.host}`;
 }
 
 export async function POST(req: Request) {
@@ -48,17 +40,19 @@ export async function POST(req: Request) {
       );
     }
 
-    const base = getBaseUrl(req); // <- always includes scheme
+    const base = getBaseUrl(req);
+
     const params: Stripe.Checkout.SessionCreateParams = {
       mode: planKey === "annual" ? "subscription" : "payment",
       line_items: [{ price, quantity: 1 }],
-      success_url: `${base}/success?session_id={CHECKOUT_SESSION_ID}`,
+      // IMPORTANT: use sessionId (camelCase) to match your report API
+      success_url: `${base}/success?sessionId={CHECKOUT_SESSION_ID}`,
       cancel_url: `${base}/pricing`,
-      metadata: { planKey, previewId },
+      // IMPORTANT: use snake_case to match your webhook reader
+      metadata: { plan_key: planKey, preview_id: previewId },
       ...(promotionCodeId
         ? { discounts: [{ promotion_code: promotionCodeId }] }
         : { allow_promotion_codes: true }),
-      // Only permitted in payment mode:
       ...(planKey === "one_time" ? { customer_creation: "always" } : {}),
     };
 
