@@ -1,42 +1,138 @@
 // src/app/api/report/generate-and-email/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { Resend } from "resend";
+import { NextResponse } from "next/server";
 import { sql } from "../../../../lib/db"; // adjust if your path differs
-import { generatePdfBuffer } from "../../../../lib/pdf";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { Resend } from "resend";
 
-export const dynamic = "force-dynamic";
+/** Build a very simple PDF buffer describing the preview */
+async function buildPdf(opts: {
+  provider: string;
+  profile: string;
+  grade: string;
+  holdings: { symbol: string; weight: number }[];
+}) {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]); // Letter
+  const font = await doc.embedFont(StandardFonts.Helvetica);
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+  const margin = 50;
+  let y = 792 - margin;
 
-export async function POST(req: NextRequest) {
+  const draw = (text: string, size = 12, color = rgb(0, 0, 0)) => {
+    page.drawText(text, { x: margin, y, size, font, color });
+    y -= size + 6;
+  };
+
+  // Title
+  draw("GradeYour401k — Preliminary Report", 18);
+  draw(`Provider: ${opts.provider}`, 12);
+  draw(`Profile: ${opts.profile}`, 12);
+  draw(`Grade: ${opts.grade} / 5`, 14);
+
+  y -= 6;
+  draw("Holdings", 14);
+  if (!opts.holdings.length) {
+    draw("None provided.", 12);
+  } else {
+    opts.holdings.forEach((h) => {
+      draw(`${(Number(h.weight) || 0).toFixed(1)}% ${String(h.symbol).toUpperCase()}`, 11);
+    });
+  }
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
+}
+
+async function sendEmailWithPdf(params: {
+  to: string;
+  provider: string;
+  profile: string;
+  grade: string;
+  holdings: { symbol: string; weight: number }[];
+}) {
+  const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+  const FROM_EMAIL = process.env.FROM_EMAIL || "";
+  if (!RESEND_API_KEY) throw new Error("Missing RESEND_API_KEY");
+  if (!FROM_EMAIL) throw new Error("Missing FROM_EMAIL");
+
+  const resend = new Resend(RESEND_API_KEY);
+
+  const pdf = await buildPdf({
+    provider: params.provider,
+    profile: params.profile,
+    grade: params.grade,
+    holdings: params.holdings,
+  });
+
+  const subject = `Your GradeYour401k report`;
+  const html = `
+    <div style="font-family:Arial, sans-serif; line-height:1.5">
+      <p>Thanks for using GradeYour401k!</p>
+      <p>Your preliminary PDF is attached.</p>
+      <ul>
+        <li><strong>Provider:</strong> ${params.provider}</li>
+        <li><strong>Profile:</strong> ${params.profile}</li>
+        <li><strong>Grade:</strong> ${params.grade} / 5</li>
+      </ul>
+      <p>If you didn’t request this report, you can ignore this email.</p>
+    </div>
+  `;
+
+  const { error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: params.to,
+    subject,
+    html,
+    attachments: [
+      {
+        filename: "GradeYour401k_Report.pdf",
+        content: pdf.toString("base64"),
+      },
+    ],
+  });
+
+  if (error) throw new Error(`Resend error: ${error.message || String(error)}`);
+}
+
+type PreviewRow = {
+  id: string;
+  provider: string | null;
+  provider_display: string | null;
+  profile: string | null;
+  rows: any; // JSON array of {symbol, weight}
+  grade_base: number | null;
+  grade_adjusted: number | null;
+};
+
+export async function POST(req: Request) {
   try {
-    const { email, previewId } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const email = String(body?.email || "").trim();
+    const previewId = String(body?.previewId || "").trim();
 
-    if (!email || !previewId) {
-      return NextResponse.json(
-        { error: "Missing email or previewId" },
-        { status: 400 }
-      );
+    if (!email) {
+      return NextResponse.json({ error: "Missing destination email" }, { status: 400 });
+    }
+    if (!previewId) {
+      return NextResponse.json({ error: "Missing previewId" }, { status: 400 });
     }
 
-    // Load the saved preview
-    const r = await sql(
-      `SELECT provider, provider_display, profile, "rows", grade_adjusted, grade_base
-       FROM public.previews
-       WHERE id::text = $1
-       LIMIT 1`,
-      [String(previewId)]
-    );
-    const p: any = r.rows?.[0];
+    // Load preview
+    const r = await sql<PreviewRow>`
+      SELECT id, provider, provider_display, profile, "rows", grade_base, grade_adjusted
+      FROM public.previews
+      WHERE id::text = ${previewId}
+      LIMIT 1
+    `;
+    const p = r.rows?.[0];
     if (!p) {
       return NextResponse.json(
-        { error: "Preview not found for given previewId" },
+        { error: `Preview not found for id ${previewId}` },
         { status: 404 }
       );
     }
 
-    const provider =
-      p.provider_display || p.provider || "Unknown Provider";
+    const providerDisplay = p.provider_display || p.provider || "—";
     const profile = p.profile || "—";
     const gradeNum =
       typeof p.grade_adjusted === "number"
@@ -46,68 +142,38 @@ export async function POST(req: NextRequest) {
         : null;
     const grade = gradeNum !== null ? gradeNum.toFixed(1) : "—";
 
-    // Parse holdings (stored as JSON in previews.rows)
-    let holdings: Array<{ symbol: string; weight: number }> = [];
+    // Normalize holdings array
+    let holdings: { symbol: string; weight: number }[] = [];
     try {
       const raw = p.rows;
-      const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
-      holdings = (arr as any[]).map((h) => ({
-        symbol: String(h.symbol || "").toUpperCase(),
-        weight: Number(h.weight || 0),
+      const arr = Array.isArray(raw) ? raw : JSON.parse(raw as any);
+      holdings = (arr as any[]).map((r) => ({
+        symbol: String(r?.symbol || "").toUpperCase(),
+        weight: Number(r?.weight || 0),
       }));
     } catch {
       holdings = [];
     }
 
-    // Generate PDF
-    const pdfBytes = await generatePdfBuffer({
-      provider,
+    await sendEmailWithPdf({
+      to: email,
+      provider: providerDisplay,
       profile,
       grade,
       holdings,
     });
 
-    // Email with attachment
-    const subject = `Your GradeYour401k Report (${grade} / 5)`;
-    const html = `
-      <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
-        <p>Hi,</p>
-        <p>Your preliminary report for <strong>${provider}</strong> (${profile}) is attached.</p>
-        <p>Grade: <strong>${grade} / 5</strong></p>
-        <p>Thanks for using GradeYour401k!</p>
-      </div>
-    `;
-
-    const send = await resend.emails.send({
-      from: "reports@gradeyour401k.kenaiinvest.com",
-      to: email,
-      subject,
-      html,
-      attachments: [
-        {
-          filename: "GradeYour401k-Report.pdf",
-          content: Buffer.from(pdfBytes),
-        },
-      ],
-    });
-
-    if (send.error) {
-      console.error("[generate-and-email] resend error:", send.error);
-      return NextResponse.json(
-        { error: "Email send failed", detail: String(send.error) },
-        { status: 500 }
-      );
-    }
-
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error("[report generate-and-email] error:", err);
     return NextResponse.json(
-      { error: err?.message || "Internal error" },
+      { error: err?.message || "Failed to generate and email report" },
       { status: 500 }
     );
   }
 }
 
+// Simple health check
 export async function GET() {
-  return NextResponse.json({ ok: true
+  return NextResponse.json({ ok: true, method: "GET" });
+}
