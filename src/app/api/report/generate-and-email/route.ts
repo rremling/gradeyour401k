@@ -1,127 +1,191 @@
 // src/app/api/report/generate-and-email/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db";
-import { buildReportPDF, type PreviewData } from "@/lib/pdf";
-import { sendReportEmail } from "@/lib/email";
-import { getMarketRegime } from "@/lib/market";
-import Stripe from "stripe";
+import PDFDocument from "pdfkit";
+import { sendReportEmail } from "../../../../lib/email"; // relative to this file
+import { sql } from "../../../../lib/db"; // adjust if your db export differs
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-async function loadPreview(previewId: string): Promise<PreviewData | null> {
-  if (!previewId) return null;
-  try {
-    const rows = await query<{
-      provider: string; profile: string; rows: any;
-      grade_base: number; grade_adjusted: number;
-    }>(
-      `select provider, profile, rows, grade_base, grade_adjusted
-         from previews
-        where id = $1`,
-      [previewId]
-    );
-    if (!rows?.length) return null;
-    const p = rows[0];
-    return {
-      provider: p.provider || "",
-      profile: p.profile || "Growth",
-      rows: Array.isArray(p.rows) ? p.rows : [],
-      grade_base: Number(p.grade_base) || 0,
-      grade_adjusted: Number(p.grade_adjusted) || 0,
-    };
-  } catch {
-    return null;
-  }
+// ---------- helpers ----------
+async function getPreview(previewId: string) {
+  const r = await sql(
+    `SELECT id, created_at, provider, provider_display, profile, "rows", grade_base, grade_adjusted
+     FROM public.previews
+     WHERE id::text = $1
+     LIMIT 1`,
+    [previewId]
+  );
+  return r.rows?.[0] ?? null;
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { previewId, sessionId, email: emailOverride } = await req.json().catch(() => ({}));
+function renderPdfBuffer({
+  provider,
+  provider_display,
+  profile,
+  grade,
+  rows,
+}: {
+  provider: string;
+  provider_display: string;
+  profile: string;
+  grade: string;
+  rows: Array<{ symbol: string; weight: number }>;
+}): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: "LETTER", margin: 50 });
+      const bufs: Uint8Array[] = [];
 
-    // 1) Try DB first (orders table)
-    let email: string | null = null;
-    let previewFromOrder: string | null = null;
-
-    if (sessionId) {
-      try {
-        const rows = await query<{ customer_email: string | null; preview_id: string | null }>(
-          `select customer_email, preview_id
-             from orders
-            where stripe_session_id = $1
-            order by created_at desc
-            limit 1`,
-          [sessionId]
-        );
-        if (rows?.length) {
-          email = rows[0].customer_email;
-          previewFromOrder = rows[0].preview_id;
-        }
-      } catch {}
-    }
-
-    // 2) If DB didn’t have it, ask Stripe for the session to get email + metadata
-    if (!email && sessionId) {
-      const sk = process.env.STRIPE_SECRET_KEY;
-      if (!sk) return NextResponse.json({ error: "Missing STRIPE_SECRET_KEY" }, { status: 500 });
-      const stripe = new Stripe(sk, { apiVersion: "2024-06-20" });
-      const session = await stripe.checkout.sessions.retrieve(sessionId, {
-        expand: ["customer"],
+      doc.on("data", (d) => bufs.push(d));
+      doc.on("end", () => {
+        resolve(Buffer.concat(bufs));
       });
 
-      email =
-        session.customer_details?.email ||
-        (session.customer_email as string) ||
-        (typeof session.customer === "object" && session.customer?.email) ||
-        null;
+      // Header
+      doc.fontSize(18).text("GradeYour401k — Personalized Report", { align: "left" });
+      doc.moveDown(0.5);
+      doc.fontSize(10).fillColor("#666").text("Kenai Investments Inc.");
+      doc.fillColor("#000").moveDown();
 
-      // grab preview from metadata if present
-      if (!previewFromOrder) {
-        const m = session.metadata || {};
-        if (m.previewId && typeof m.previewId === "string") {
-          previewFromOrder = m.previewId;
-        }
-      }
+      // Summary
+      doc.fontSize(12).text(`Provider: ${provider_display || provider || "—"}`);
+      doc.text(`Profile: ${profile || "—"}`);
+      doc.text(`Preliminary Grade: ${grade || "—"} / 5`);
+      doc.moveDown();
+
+      // Holdings
+      doc.fontSize(12).text("Holdings", { underline: true });
+      doc.moveDown(0.3);
+      rows.forEach((r) => {
+        const w = Number.isFinite(r.weight) ? r.weight : 0;
+        doc.text(`${(r.symbol || "").toUpperCase()} — ${w.toFixed(1)}%`);
+      });
+
+      // Footer
+      doc.moveDown();
+      doc.fontSize(9).fillColor("#666").text(
+        "This preview is informational. Your paid report includes deeper analysis, market regime overlay, and guidance.",
+        { align: "left" }
+      );
+
+      doc.end();
+    } catch (err) {
+      reject(err);
     }
+  });
+}
 
-    // 3) Final email resolution (allow explicit override from client)
-    const toEmail = emailOverride || email || null;
-    if (!toEmail) {
+async function handleGenerateAndEmail({
+  email,
+  previewId,
+}: {
+  email: string;
+  previewId: string;
+}) {
+  // 1) Load preview
+  const p = await getPreview(previewId);
+  if (!p) throw new Error(`Preview not found: ${previewId}`);
+
+  // 2) Parse rows
+  let rows: Array<{ symbol: string; weight: number }> = [];
+  try {
+    const raw = p.rows;
+    const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
+    rows = (arr as any[]).map((r) => ({
+      symbol: String(r.symbol || "").toUpperCase(),
+      weight: Number(r.weight || 0),
+    }));
+  } catch {
+    rows = [];
+  }
+
+  // 3) Pick grade
+  const grade =
+    typeof p.grade_adjusted === "number"
+      ? p.grade_adjusted.toFixed(1)
+      : typeof p.grade_base === "number"
+      ? p.grade_base.toFixed(1)
+      : "—";
+
+  // 4) Generate PDF buffer
+  const pdfBuffer = await renderPdfBuffer({
+    provider: p.provider,
+    provider_display: p.provider_display,
+    profile: p.profile,
+    grade,
+    rows,
+  });
+
+  // 5) Email
+  const html = `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+      <p>Thanks for your purchase!</p>
+      <p>Your personalized 401(k) report is attached.</p>
+      <p style="font-size:12px;color:#666">Kenai Investments Inc.</p>
+    </div>
+  `;
+
+  await sendReportEmail({
+    to: email,
+    subject: "Your GradeYour401k Report",
+    html,
+    attachments: [
+      {
+        filename: "GradeYour401k-Report.pdf",
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  });
+
+  return { ok: true };
+}
+
+// ---------- POST (preferred) ----------
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => ({} as any));
+    const email = String(body.email || "").trim();
+    const previewId = String(body.previewId || "").trim();
+
+    if (!email || !previewId) {
       return NextResponse.json(
-        { error: "Missing destination email (no order email found and none in Stripe session)" },
+        { error: "Missing email or previewId" },
         { status: 400 }
       );
     }
 
-    // 4) Resolve preview data (prefer explicit previewId in body, then order/stripe)
-    const resolvedPreviewId = (previewId as string) || (previewFromOrder as string) || "";
-    let data: PreviewData | null = null;
-    if (resolvedPreviewId) data = await loadPreview(resolvedPreviewId);
+    const out = await handleGenerateAndEmail({ email, previewId });
+    return NextResponse.json(out);
+  } catch (err: any) {
+    console.error("[report generate-and-email] error:", err);
+    return NextResponse.json(
+      { error: err?.message || "Internal error" },
+      { status: 500 }
+    );
+  }
+}
 
-    // 5) Fallback to starter report if no preview exists yet
-    if (!data) {
-      data = { provider: "", profile: "Growth", rows: [], grade_base: 0, grade_adjusted: 0 };
+// ---------- GET (manual testing) ----------
+// e.g. /api/report/generate-and-email?email=you@site.com&previewId=UUID
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const email = String(searchParams.get("email") || "").trim();
+    const previewId = String(searchParams.get("previewId") || "").trim();
+
+    if (!email || !previewId) {
+      return NextResponse.json(
+        { error: "Missing email or previewId" },
+        { status: 400 }
+      );
     }
 
-    // 6) Market regime + PDF
-    const regime = await getMarketRegime();
-    const pdf = await buildReportPDF({ ...data, market_regime: regime });
-
-    // 7) Email it
-    await sendReportEmail({
-      to: toEmail,
-      subject: "Your GradeYour401k Report",
-      html:
-        (resolvedPreviewId
-          ? `<p>Your personalized report is attached.</p>`
-          : `<p>Your starter report is attached. For a more detailed report, please complete your holdings here: <a href="${process.env.NEXT_PUBLIC_BASE_URL || ""}/grade/new">Finish inputs</a>.</p>`) +
-        `<p>— GradeYour401k</p>`,
-      attachment: { filename: "GradeYour401k-Report.pdf", content: pdf },
-    });
-
-    return NextResponse.json({ ok: true, usedPreview: !!resolvedPreviewId });
-  } catch (e: any) {
-    console.error("[report resend] error:", e?.message || e);
-    return NextResponse.json({ error: e?.message || "Failed to generate/send report" }, { status: 500 });
+    const out = await handleGenerateAndEmail({ email, previewId });
+    return NextResponse.json(out);
+  } catch (err: any) {
+    console.error("[report generate-and-email GET] error:", err);
+    return NextResponse.json(
+      { error: err?.message || "Internal error" },
+      { status: 500 }
+    );
   }
 }
