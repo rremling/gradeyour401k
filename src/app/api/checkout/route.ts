@@ -9,14 +9,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!;
 const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
 
-/** Get a fully-qualified base URL with scheme */
 function getBaseUrl(req: Request): string {
   const explicit = process.env.NEXT_PUBLIC_BASE_URL;
   if (explicit && /^https?:\/\//i.test(explicit)) return explicit.replace(/\/+$/, "");
-
-  const vercelHost = process.env.VERCEL_URL; // e.g. "www.gradeyour401k.com"
+  const vercelHost = process.env.VERCEL_URL;
   if (vercelHost) return `https://${vercelHost.replace(/\/+$/, "")}`;
-
   const u = new URL(req.url);
   return `${u.protocol}//${u.host}`;
 }
@@ -40,16 +37,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const base = getBaseUrl(req);
-
+    const base = getBaseUrl(req); // e.g. https://www.gradeyour401k.com
     const params: Stripe.Checkout.SessionCreateParams = {
       mode: planKey === "annual" ? "subscription" : "payment",
       line_items: [{ price, quantity: 1 }],
-      // IMPORTANT: use sessionId (camelCase) to match your report API
-      success_url: `${base}/success?session_Id={CHECKOUT_SESSION_ID}`,
+      // NOTE: trailing slash helps avoid a redirect that can drop the query string
+      success_url: `${base}/success/?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${base}/pricing`,
-      // IMPORTANT: use snake_case to match your webhook reader
-      metadata: { plan_key: planKey, preview_id: previewId },
+      metadata: { plan_key: planKey, preview_id: previewId }, // snake_case for webhook
       ...(promotionCodeId
         ? { discounts: [{ promotion_code: promotionCodeId }] }
         : { allow_promotion_codes: true }),
