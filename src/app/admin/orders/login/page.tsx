@@ -1,9 +1,10 @@
 "use client";
 
+import { Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState } from "react";
 
-export default function AdminLoginPage() {
+// Wrap the hook-using form in Suspense to satisfy Next's CSR bailout rule.
+function LoginForm() {
   const sp = useSearchParams();
   const router = useRouter();
   const returnTo = sp.get("returnTo") || "/admin/orders";
@@ -23,9 +24,7 @@ export default function AdminLoginPage() {
         body: JSON.stringify({ token }),
       });
       const data = await res.json();
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Invalid token");
-      }
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Invalid token");
       router.replace(returnTo);
     } catch (e: any) {
       setErr(e?.message || "Login failed");
@@ -60,5 +59,21 @@ export default function AdminLoginPage() {
         {err && <p className="text-sm text-red-600">{err}</p>}
       </form>
     </main>
+  );
+}
+
+export default function AdminLoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-sm p-6">
+          <div className="rounded-lg border p-4 bg-white text-sm text-gray-600">
+            Loading…
+          </div>
+        </main>
+      }
+    >
+      <LoginForm />
+    </Suspense>
   );
 }
