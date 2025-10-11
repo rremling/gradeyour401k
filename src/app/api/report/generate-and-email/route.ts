@@ -1,67 +1,113 @@
 // src/app/api/report/generate-and-email/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "@/lib/db";
-import { generatePdfBuffer } from "@/lib/pdf"; // your existing helper
-import { sendReportEmail } from "@/lib/email"; // your existing helper
+import { Resend } from "resend";
+import { sql } from "../../../../lib/db"; // adjust if your path differs
+import { generatePdfBuffer } from "../../../../lib/pdf";
 
 export const dynamic = "force-dynamic";
 
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const session_id = String(body.session_id || "").trim();
+    const { email, previewId } = await req.json();
 
-    if (!session_id) {
-      return NextResponse.json({ ok: false, error: "Missing session_id" }, { status: 400 });
+    if (!email || !previewId) {
+      return NextResponse.json(
+        { error: "Missing email or previewId" },
+        { status: 400 }
+      );
     }
 
-    // Get order info (we only need email + preview_id)
+    // Load the saved preview
     const r = await sql(
-      `SELECT id, email, preview_id, status
-         FROM public.orders
-        WHERE stripe_session_id = $1
-        LIMIT 1`,
-      [session_id]
+      `SELECT provider, provider_display, profile, "rows", grade_adjusted, grade_base
+       FROM public.previews
+       WHERE id::text = $1
+       LIMIT 1`,
+      [String(previewId)]
     );
-
-    const order = r.rows?.[0];
-    if (!order) {
-      // Don’t 500 — report the situation so the client can retry or show a message
-      return NextResponse.json({ ok: false, error: "Order not found for session_id" }, { status: 404 });
+    const p: any = r.rows?.[0];
+    if (!p) {
+      return NextResponse.json(
+        { error: "Preview not found for given previewId" },
+        { status: 404 }
+      );
     }
 
-    if (!order.email) {
-      // Do NOT throw — tell the client we need an email capture flow
-      return NextResponse.json({ ok: false, needEmail: true, error: "Missing destination email" }, { status: 200 });
-    }
-    if (!order.preview_id) {
-      return NextResponse.json({ ok: false, error: "Missing preview_id" }, { status: 200 });
+    const provider =
+      p.provider_display || p.provider || "Unknown Provider";
+    const profile = p.profile || "—";
+    const gradeNum =
+      typeof p.grade_adjusted === "number"
+        ? p.grade_adjusted
+        : typeof p.grade_base === "number"
+        ? p.grade_base
+        : null;
+    const grade = gradeNum !== null ? gradeNum.toFixed(1) : "—";
+
+    // Parse holdings (stored as JSON in previews.rows)
+    let holdings: Array<{ symbol: string; weight: number }> = [];
+    try {
+      const raw = p.rows;
+      const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
+      holdings = (arr as any[]).map((h) => ({
+        symbol: String(h.symbol || "").toUpperCase(),
+        weight: Number(h.weight || 0),
+      }));
+    } catch {
+      holdings = [];
     }
 
-    // Generate PDF (buffer) and email it
-    const pdf = await generatePdfBuffer(order.preview_id);
-    await sendReportEmail({
-      to: order.email,
-      subject: "Your GradeYour401k Report",
-      pdfBuffer: pdf,
-      filename: "GradeYour401k-Report.pdf",
+    // Generate PDF
+    const pdfBytes = await generatePdfBuffer({
+      provider,
+      profile,
+      grade,
+      holdings,
     });
 
-    // Optional: mark as emailed
-    await sql(
-      `UPDATE public.orders
-          SET status = 'emailed'
-        WHERE stripe_session_id = $1`,
-      [session_id]
-    );
+    // Email with attachment
+    const subject = `Your GradeYour401k Report (${grade} / 5)`;
+    const html = `
+      <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+        <p>Hi,</p>
+        <p>Your preliminary report for <strong>${provider}</strong> (${profile}) is attached.</p>
+        <p>Grade: <strong>${grade} / 5</strong></p>
+        <p>Thanks for using GradeYour401k!</p>
+      </div>
+    `;
 
-    return NextResponse.json({ ok: true }, { status: 200 });
+    const send = await resend.emails.send({
+      from: "reports@gradeyour401k.kenaiinvest.com",
+      to: email,
+      subject,
+      html,
+      attachments: [
+        {
+          filename: "GradeYour401k-Report.pdf",
+          content: Buffer.from(pdfBytes),
+        },
+      ],
+    });
+
+    if (send.error) {
+      console.error("[generate-and-email] resend error:", send.error);
+      return NextResponse.json(
+        { error: "Email send failed", detail: String(send.error) },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error("[report generate-and-email] error:", err?.message || err);
-    return NextResponse.json({ ok: false, error: "Internal error" }, { status: 500 });
+    console.error("[report generate-and-email] error:", err);
+    return NextResponse.json(
+      { error: err?.message || "Internal error" },
+      { status: 500 }
+    );
   }
 }
 
 export async function GET() {
-  return NextResponse.json({ ok: true, endpoint: "report/generate-and-email" });
-}
+  return NextResponse.json({ ok: true
