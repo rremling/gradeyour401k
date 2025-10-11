@@ -1,151 +1,127 @@
 // src/app/api/report/generate-and-email/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "../../../../lib/db";
-import { pdf } from "@react-pdf/renderer";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { Resend } from "resend";
+import { query } from "@/lib/db";
+import { buildReportPDF, type PreviewData } from "@/lib/pdf";
+import { sendReportEmail } from "@/lib/email";
+import { getMarketRegime } from "@/lib/market";
+import Stripe from "stripe";
 
-// Initialize Resend
-const resend = new Resend(process.env.RESEND_API_KEY);
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-// ✅ Always JSON-safe helper
-function safeJson(obj: any) {
+async function loadPreview(previewId: string): Promise<PreviewData | null> {
+  if (!previewId) return null;
   try {
-    return JSON.stringify(obj);
+    const rows = await query<{
+      provider: string; profile: string; rows: any;
+      grade_base: number; grade_adjusted: number;
+    }>(
+      `select provider, profile, rows, grade_base, grade_adjusted
+         from previews
+        where id = $1`,
+      [previewId]
+    );
+    if (!rows?.length) return null;
+    const p = rows[0];
+    return {
+      provider: p.provider || "",
+      profile: p.profile || "Growth",
+      rows: Array.isArray(p.rows) ? p.rows : [],
+      grade_base: Number(p.grade_base) || 0,
+      grade_adjusted: Number(p.grade_adjusted) || 0,
+    };
   } catch {
-    return "{}";
+    return null;
   }
 }
 
-export const dynamic = "force-dynamic";
-
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const email = String(body.email || "").trim();
-    const previewId = String(body.previewId || "").trim();
+    const { previewId, sessionId, email: emailOverride } = await req.json().catch(() => ({}));
 
-    if (!email || !previewId) {
+    // 1) Try DB first (orders table)
+    let email: string | null = null;
+    let previewFromOrder: string | null = null;
+
+    if (sessionId) {
+      try {
+        const rows = await query<{ customer_email: string | null; preview_id: string | null }>(
+          `select customer_email, preview_id
+             from orders
+            where stripe_session_id = $1
+            order by created_at desc
+            limit 1`,
+          [sessionId]
+        );
+        if (rows?.length) {
+          email = rows[0].customer_email;
+          previewFromOrder = rows[0].preview_id;
+        }
+      } catch {}
+    }
+
+    // 2) If DB didn’t have it, ask Stripe for the session to get email + metadata
+    if (!email && sessionId) {
+      const sk = process.env.STRIPE_SECRET_KEY;
+      if (!sk) return NextResponse.json({ error: "Missing STRIPE_SECRET_KEY" }, { status: 500 });
+      const stripe = new Stripe(sk, { apiVersion: "2024-06-20" });
+      const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        expand: ["customer"],
+      });
+
+      email =
+        session.customer_details?.email ||
+        (session.customer_email as string) ||
+        (typeof session.customer === "object" && session.customer?.email) ||
+        null;
+
+      // grab preview from metadata if present
+      if (!previewFromOrder) {
+        const m = session.metadata || {};
+        if (m.previewId && typeof m.previewId === "string") {
+          previewFromOrder = m.previewId;
+        }
+      }
+    }
+
+    // 3) Final email resolution (allow explicit override from client)
+    const toEmail = emailOverride || email || null;
+    if (!toEmail) {
       return NextResponse.json(
-        { ok: false, error: "Missing email or previewId" },
+        { error: "Missing destination email (no order email found and none in Stripe session)" },
         { status: 400 }
       );
     }
 
-    // Fetch preview data
-    const r = await sql(
-      `SELECT id, provider_display, profile, grade_adjusted, grade_base
-       FROM public.previews
-       WHERE id::text = $1
-       LIMIT 1`,
-      [previewId]
-    );
+    // 4) Resolve preview data (prefer explicit previewId in body, then order/stripe)
+    const resolvedPreviewId = (previewId as string) || (previewFromOrder as string) || "";
+    let data: PreviewData | null = null;
+    if (resolvedPreviewId) data = await loadPreview(resolvedPreviewId);
 
-    const p = r.rows?.[0];
-    if (!p) {
-      return NextResponse.json(
-        { ok: false, error: `Preview not found (${previewId})` },
-        { status: 404 }
-      );
+    // 5) Fallback to starter report if no preview exists yet
+    if (!data) {
+      data = { provider: "", profile: "Growth", rows: [], grade_base: 0, grade_adjusted: 0 };
     }
 
-    // Compute grade
-    const grade =
-      typeof p.grade_adjusted === "number"
-        ? p.grade_adjusted.toFixed(1)
-        : typeof p.grade_base === "number"
-        ? p.grade_base.toFixed(1)
-        : "—";
+    // 6) Market regime + PDF
+    const regime = await getMarketRegime();
+    const pdf = await buildReportPDF({ ...data, market_regime: regime });
 
-    // ✅ Create a basic PDF using pdf-lib (safe for Vercel, no AFM fonts)
-    const pdfDoc = await PDFDocument.create();
-    const page = pdfDoc.addPage([600, 780]);
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-
-    page.drawText("401(k) Report", {
-      x: 50,
-      y: 720,
-      size: 24,
-      font,
-      color: rgb(0.1, 0.3, 0.6),
+    // 7) Email it
+    await sendReportEmail({
+      to: toEmail,
+      subject: "Your GradeYour401k Report",
+      html:
+        (resolvedPreviewId
+          ? `<p>Your personalized report is attached.</p>`
+          : `<p>Your starter report is attached. For a more detailed report, please complete your holdings here: <a href="${process.env.NEXT_PUBLIC_BASE_URL || ""}/grade/new">Finish inputs</a>.</p>`) +
+        `<p>— GradeYour401k</p>`,
+      attachment: { filename: "GradeYour401k-Report.pdf", content: pdf },
     });
 
-    page.drawText(`Provider: ${p.provider_display || "—"}`, {
-      x: 50,
-      y: 680,
-      size: 14,
-      font,
-    });
-
-    page.drawText(`Profile: ${p.profile || "—"}`, {
-      x: 50,
-      y: 660,
-      size: 14,
-      font,
-    });
-
-    page.drawText(`Grade: ${grade} / 5`, {
-      x: 50,
-      y: 640,
-      size: 16,
-      font,
-      color: rgb(0.2, 0.6, 0.2),
-    });
-
-    page.drawText(
-      "This report provides your personalized 401(k) grade and profile summary.",
-      {
-        x: 50,
-        y: 600,
-        size: 12,
-        font,
-      }
-    );
-
-    const pdfBytes = await pdfDoc.save();
-    const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
-
-    // ✅ Send email via Resend
-    const subject = `Your 401(k) Report — Grade ${grade}/5`;
-    const textBody = `Hi there,
-
-Your personalized 401(k) report is attached as a PDF.
-
-Provider: ${p.provider_display || "—"}
-Profile: ${p.profile || "—"}
-Grade: ${grade}/5
-
-Thank you for using GradeYour401k.com!
-
-— Kenai Investments Team
-`;
-
-    await resend.emails.send({
-      from: "reports@gradeyour401k.com",
-      to: email,
-      subject,
-      text: textBody,
-      attachments: [
-        {
-          filename: `401k_Report_${previewId}.pdf`,
-          content: pdfBase64,
-        },
-      ],
-    });
-
-    console.log(`[generate-and-email] PDF emailed to ${email}`);
-
-    return NextResponse.json({
-      ok: true,
-      email,
-      previewId,
-      grade,
-    });
-  } catch (err: any) {
-    console.error("[generate-and-email] error:", err);
-    return NextResponse.json(
-      { ok: false, error: err?.message || "PDF generation failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true, usedPreview: !!resolvedPreviewId });
+  } catch (e: any) {
+    console.error("[report resend] error:", e?.message || e);
+    return NextResponse.json({ error: e?.message || "Failed to generate/send report" }, { status: 500 });
   }
 }
