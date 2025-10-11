@@ -3,167 +3,181 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import Link from "next/link";
 
-// ---- Stepper ----
-function Stepper({ current = 4 }: { current?: 1 | 2 | 3 | 4 }) {
-  const steps = [
-    { n: 1, label: "Get Grade" },
-    { n: 2, label: "Review" },
-    { n: 3, label: "Purchase" },
-    { n: 4, label: "Report Sent" },
-  ] as const;
-
-  return (
-    <div className="w-full">
-      <ol className="flex items-center gap-3 text-sm">
-        {steps.map((s, idx) => {
-          const isActive = s.n === current;
-          const isComplete = s.n < current;
-          return (
-            <li key={s.n} className="flex items-center gap-3">
-              <div
-                className={[
-                  "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
-                  isActive
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : isComplete
-                    ? "border-blue-600 text-blue-600"
-                    : "border-gray-300 text-gray-600",
-                ].join(" ")}
-              >
-                {s.n}
-              </div>
-              <span
-                className={[
-                  "whitespace-nowrap",
-                  isActive ? "font-semibold text-blue-700" : "text-gray-700",
-                ].join(" ")}
-              >
-                {s.label}
-              </span>
-              {idx < steps.length - 1 && (
-                <div
-                  className={[
-                    "mx-2 h-px w-10 md:w-16",
-                    isComplete ? "bg-blue-600" : "bg-gray-300",
-                  ].join(" ")}
-                />
-              )}
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}
+type State =
+  | { kind: "idle" }
+  | { kind: "working" }
+  | { kind: "needEmail" }
+  | { kind: "done" }
+  | { kind: "error"; message: string };
 
 export default function SuccessClient() {
   const sp = useSearchParams();
-  const [resending, setResending] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [state, setState] = useState<State>({ kind: "idle" });
+  const [email, setEmail] = useState("");
 
-  const email = sp.get("email") || "";
-  const orderId = sp.get("orderId") || "";
-  const [previewId, setPreviewId] = useState<string | null>(null);
+  const sessionId = sp.get("session_id") || "";
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const id = localStorage.getItem("gy4k_preview_id");
-    setPreviewId(id || null);
-  }, []);
+    let cancelled = false;
 
-  async function resend() {
-    setMsg(null);
+    async function run() {
+      if (!sessionId) {
+        setState({ kind: "error", message: "Missing session_id" });
+        return;
+      }
+      setState({ kind: "working" });
+
+      try {
+        const res = await fetch("/api/report/generate-and-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+
+        // route returns JSON; handle non-JSON defensively
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = null;
+        }
+
+        if (!res.ok) {
+          setState({
+            kind: "error",
+            message: data?.error || "Could not finalize your order.",
+          });
+          return;
+        }
+
+        if (data?.needEmail) {
+          // Order exists but no email captured; show capture form
+          setState({ kind: "needEmail" });
+          return;
+        }
+
+        if (data?.ok) {
+          setState({ kind: "done" });
+          return;
+        }
+
+        setState({
+          kind: "error",
+          message: data?.error || "Unexpected response. Please try again.",
+        });
+      } catch (e: any) {
+        setState({
+          kind: "error",
+          message: e?.message || "Network error while finalizing.",
+        });
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  async function submitEmail(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email || !sessionId) return;
+
     try {
-      setResending(true);
-      const res = await fetch("/api/report/generate-and-email", {
+      // Save email to order, then re-run generate-and-email
+      const res1 = await fetch("/api/order/finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          // Prefer server-side lookup by orderId/email; previewId is a fallback
-          previewId: previewId || undefined,
-          email: email || undefined,
-          force: true,
-        }),
+        body: JSON.stringify({ session_id: sessionId, email }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setMsg(data?.error || "Resend failed. Please try again.");
+      const d1 = await res1.json();
+      if (!res1.ok || !d1?.ok) {
+        setState({
+          kind: "error",
+          message: d1?.error || "Could not save email.",
+        });
+        return;
+      }
+
+      const res2 = await fetch("/api/report/generate-and-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      const d2 = await res2.json();
+      if (res2.ok && d2?.ok) {
+        setState({ kind: "done" });
       } else {
-        setMsg("Report re-sent! Check your inbox in a moment.");
+        setState({
+          kind: "error",
+          message: d2?.error || "Could not send your report.",
+        });
       }
     } catch (e: any) {
-      setMsg(e?.message || "Resend failed.");
-    } finally {
-      setResending(false);
+      setState({
+        kind: "error",
+        message: e?.message || "Network error while saving email.",
+      });
     }
   }
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
-      {/* Progress / flow */}
-      <Stepper current={4} />
+      <h1 className="text-2xl font-bold">Order Confirmed</h1>
 
-      <h1 className="text-2xl font-bold">Report sent</h1>
-
-      <div className="rounded-lg border p-6 bg-white space-y-3">
-        <p className="text-gray-700">
-          Thanks for your purchase! Your personalized PDF report is on its way
-          {email ? (
-            <>
-              {" "}
-              to <span className="font-medium">{email}</span>.
-            </>
-          ) : (
-            "."
-          )}
-        </p>
-        {orderId && (
-          <p className="text-sm text-gray-600">Order ID: {orderId}</p>
-        )}
-        <div className="flex gap-3 pt-2">
-          <button
-            onClick={resend}
-            disabled={resending}
-            className="rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700 disabled:opacity-50"
-          >
-            {resending ? "Re-sending…" : "Re-send report"}
-          </button>
-          <Link
-            href="/"
-            className="inline-block rounded-lg border px-4 py-2 hover:bg-gray-50"
-          >
-            Back to home
-          </Link>
+      {state.kind === "working" && (
+        <div className="rounded-lg border p-6 bg-white text-sm text-gray-700">
+          We’re preparing your PDF report…
         </div>
-        {msg && (
-          <p
-            className={`text-sm ${
-              msg.toLowerCase().includes("sent")
-                ? "text-green-700"
-                : "text-red-700"
-            }`}
-          >
-            {msg}
-          </p>
-        )}
-      </div>
+      )}
 
-      <section className="rounded-lg border p-6 bg-white space-y-2">
-        <h2 className="text-lg font-semibold">Didn’t get the email?</h2>
-        <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
-          <li>Check your spam or promotions folder.</li>
-          <li>
-            Ensure{" "}
-            <span className="font-mono">
-              reports@gradeyour401k.kenaiinvest.com
-            </span>{" "}
-            is whitelisted.
-          </li>
-          <li>Click “Re-send report” above to send it again.</li>
-        </ul>
-      </section>
+      {state.kind === "needEmail" && (
+        <div className="rounded-lg border p-6 bg-white space-y-3">
+          <p className="text-sm text-gray-700">
+            We didn’t receive your email from Checkout. Enter it below and we’ll send your report.
+          </p>
+          <form onSubmit={submitEmail} className="flex gap-2">
+            <input
+              type="email"
+              required
+              className="border rounded-md p-2 flex-1"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="rounded-md bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
+            >
+              Send my report
+            </button>
+          </form>
+        </div>
+      )}
+
+      {state.kind === "done" && (
+        <div className="rounded-lg border p-6 bg-white text-sm text-green-700">
+          Your report has been emailed. Check your inbox!
+        </div>
+      )}
+
+      {state.kind === "error" && (
+        <div className="rounded-lg border p-6 bg-white text-sm text-red-700">
+          {state.message}
+          {!!sessionId && (
+            <div className="mt-2 text-xs text-gray-500">
+              (Session: <code className="font-mono">{sessionId}</code>)
+            </div>
+          )}
+        </div>
+      )}
+
+      {state.kind === "idle" && (
+        <div className="rounded-lg border p-6 bg-white text-sm text-gray-700">
+          Finalizing your order…
+        </div>
+      )}
     </main>
   );
 }
