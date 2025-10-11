@@ -36,32 +36,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid planKey" }, { status: 400 });
     }
 
-    const session = await stripe.checkout.sessions.create({
+    // Build params so we only include ONE of the promo fields.
+    const params: Stripe.Checkout.SessionCreateParams = {
       mode: "payment",
-      payment_method_types: ["card"],
-      allow_promotion_codes: true,
-      discounts: promotionCodeId
-        ? [{ promotion_code: promotionCodeId }]
-        : undefined,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
+      line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${SITE_URL}/pricing`,
       metadata: {
         plan_key: planKey,
         preview_id: previewId,
       },
-    });
+    };
 
+    if (promotionCodeId && String(promotionCodeId).trim() !== "") {
+      // Use an explicit promotion code -> set discounts, DO NOT set allow_promotion_codes
+      params.discounts = [{ promotion_code: String(promotionCodeId) }];
+    } else {
+      // Let the customer enter a code at checkout -> set allow_promotion_codes, DO NOT set discounts
+      params.allow_promotion_codes = true;
+    }
+
+    const session = await stripe.checkout.sessions.create(params);
     return NextResponse.json({ url: session.url }, { status: 200 });
   } catch (err: any) {
     console.error("[checkout] failed:", err);
     return NextResponse.json(
-      { error: "Checkout failed. " + (err.message || "") },
+      { error: "Checkout failed. " + (err?.message || "") },
       { status: 500 }
     );
   }
