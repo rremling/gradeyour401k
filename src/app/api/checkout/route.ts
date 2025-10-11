@@ -1,100 +1,72 @@
 // src/app/api/checkout/route.ts
-import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { NextRequest } from "next/server";
 
-const stripeSecret = process.env.STRIPE_SECRET_KEY;
-const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME || process.env.STRIPE_PRICE_ID_DEFAULT;
-const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL;
+export const dynamic = "force-dynamic";
 
-if (!stripeSecret) {
-  throw new Error("Missing STRIPE_SECRET_KEY");
-}
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME || ""; // e.g. price_live_...
+const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL || ""; // e.g. price_live_...
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://www.gradeyour401k.com";
 
-const stripe = new Stripe(stripeSecret, {
-  apiVersion: "2024-06-20",
-});
+if (!STRIPE_SECRET_KEY) console.warn("[checkout] Missing STRIPE_SECRET_KEY");
+if (!PRICE_ONE_TIME) console.warn("[checkout] Missing STRIPE_PRICE_ID_ONE_TIME");
+if (!PRICE_ANNUAL) console.warn("[checkout] Missing STRIPE_PRICE_ID_ANNUAL");
+
+const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
 type Body = {
   planKey?: "one_time" | "annual";
   previewId?: string;
-  promotionCodeId?: string; // optional Stripe Promotion Code id
+  promotionCodeId?: string; // optional, pre-validated on pricing page
 };
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { planKey, previewId, promotionCodeId } = (await req.json()) as Body;
+    const body = (await req.json()) as Body;
 
-    if (!planKey || (planKey !== "one_time" && planKey !== "annual")) {
-      return NextResponse.json({ error: "Invalid planKey" }, { status: 400 });
+    // Validate required fields
+    const planKey = body.planKey;
+    const previewId = (body.previewId || "").trim();
+
+    if (!planKey || !["one_time", "annual"].includes(planKey)) {
+      return Response.json({ error: "Missing or invalid planKey" }, { status: 400 });
     }
     if (!previewId) {
-      return NextResponse.json({ error: "Missing previewId" }, { status: 400 });
+      return Response.json({ error: "Missing previewId (save your grade first)" }, { status: 400 });
     }
 
-    // Choose price & mode
-    const priceId =
-      planKey === "one_time" ? PRICE_ONE_TIME : PRICE_ANNUAL;
+    const mode = planKey === "annual" ? "subscription" : "payment";
+    const price = planKey === "annual" ? PRICE_ANNUAL : PRICE_ONE_TIME;
 
-    if (!priceId) {
-      return NextResponse.json(
-        { error: `Missing Stripe price id for plan ${planKey}. Set STRIPE_PRICE_ID_ONE_TIME / STRIPE_PRICE_ID_ANNUAL.` },
-        { status: 500 }
-      );
+    if (!price) {
+      return Response.json({ error: "Price ID not configured for this plan" }, { status: 500 });
     }
 
-    const mode: "payment" | "subscription" =
-      planKey === "one_time" ? "payment" : "subscription";
+    // Optional promotion code
+    const discounts =
+      body.promotionCodeId ? [{ promotion_code: body.promotionCodeId }] : undefined;
 
-    // Base session params (shared)
-    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+    const session = await stripe.checkout.sessions.create({
       mode,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      // IMPORTANT: pass session_id to success page
-      success_url: `https://www.gradeyour401k.com/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `https://www.gradeyour401k.com/pricing`,
-      // Keep the metadata small & clear; webhook will read these
+      line_items: [{ price, quantity: 1 }],
+      discounts, // use either discounts OR allow_promotion_codes (not both)
+      allow_promotion_codes: !discounts, // allow manual entry if none was pre-applied
+      success_url: `${SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${SITE_URL}/pricing`,
+      // CRITICAL: include the metadata your webhook expects
       metadata: {
-        plan_key: planKey,
-        preview_id: previewId,
+        plan_key: planKey, // "one_time" | "annual"
+        preview_id: previewId, // saved grade id (localStorage -> pricing -> here)
       },
-    };
+      // Optional: collect the email on Stripe Checkout
+      customer_creation: mode === "payment" ? "always" : undefined, // payment-only
+      // If you’re doing subscriptions, customer_creation is not allowed; omit for annual
+    });
 
-    // Apply promotions per Stripe rules:
-    // - EITHER `discounts` (when we already validated and have a promotion_code id)
-    // - OR `allow_promotion_codes: true` (let user type one at checkout)
-    if (promotionCodeId) {
-      (sessionParams as any).discounts = [{ promotion_code: promotionCodeId }];
-    } else {
-      (sessionParams as any).allow_promotion_codes = true;
-    }
-
-    // Create session
-    const session = await stripe.checkout.sessions.create(sessionParams);
-
-    if (!session?.url) {
-      return NextResponse.json(
-        { error: "Failed to create checkout session" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ url: session.url });
+    return Response.json({ url: session.url }, { status: 200 });
   } catch (err: any) {
-    console.error("[checkout] error:", err);
-    const msg =
-      typeof err?.message === "string"
-        ? err.message
-        : "Checkout failed. Please try again.";
-    return NextResponse.json({ error: msg }, { status: 400 });
+    console.error("[checkout] error:", err?.message || err);
+    return Response.json({ error: "Checkout failed" }, { status: 500 });
   }
-}
-
-// (Optional) GET: quick ping for health checks
-export async function GET() {
-  return NextResponse.json({ ok: true, endpoint: "/api/checkout" });
 }
