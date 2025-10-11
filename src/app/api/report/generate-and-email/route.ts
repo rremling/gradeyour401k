@@ -1,190 +1,150 @@
 // src/app/api/report/generate-and-email/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import PDFDocument from "pdfkit";
-import { sendReportEmail } from "../../../../lib/email"; // relative to this file
-import { sql } from "../../../../lib/db"; // adjust if your db export differs
+import { sql } from "../../../../lib/db";
+import { pdf } from "@react-pdf/renderer";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { Resend } from "resend";
 
-// ---------- helpers ----------
-async function getPreview(previewId: string) {
-  const r = await sql(
-    `SELECT id, created_at, provider, provider_display, profile, "rows", grade_base, grade_adjusted
-     FROM public.previews
-     WHERE id::text = $1
-     LIMIT 1`,
-    [previewId]
-  );
-  return r.rows?.[0] ?? null;
-}
+// Initialize Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-function renderPdfBuffer({
-  provider,
-  provider_display,
-  profile,
-  grade,
-  rows,
-}: {
-  provider: string;
-  provider_display: string;
-  profile: string;
-  grade: string;
-  rows: Array<{ symbol: string; weight: number }>;
-}): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    try {
-      const doc = new PDFDocument({ size: "LETTER", margin: 50 });
-      const bufs: Uint8Array[] = [];
-
-      doc.on("data", (d) => bufs.push(d));
-      doc.on("end", () => {
-        resolve(Buffer.concat(bufs));
-      });
-
-      // Header
-      doc.fontSize(18).text("GradeYour401k — Personalized Report", { align: "left" });
-      doc.moveDown(0.5);
-      doc.fontSize(10).fillColor("#666").text("Kenai Investments Inc.");
-      doc.fillColor("#000").moveDown();
-
-      // Summary
-      doc.fontSize(12).text(`Provider: ${provider_display || provider || "—"}`);
-      doc.text(`Profile: ${profile || "—"}`);
-      doc.text(`Preliminary Grade: ${grade || "—"} / 5`);
-      doc.moveDown();
-
-      // Holdings
-      doc.fontSize(12).text("Holdings", { underline: true });
-      doc.moveDown(0.3);
-      rows.forEach((r) => {
-        const w = Number.isFinite(r.weight) ? r.weight : 0;
-        doc.text(`${(r.symbol || "").toUpperCase()} — ${w.toFixed(1)}%`);
-      });
-
-      // Footer
-      doc.moveDown();
-      doc.fontSize(9).fillColor("#666").text(
-        "This preview is informational. Your paid report includes deeper analysis, market regime overlay, and guidance.",
-        { align: "left" }
-      );
-
-      doc.end();
-    } catch (err) {
-      reject(err);
-    }
-  });
-}
-
-async function handleGenerateAndEmail({
-  email,
-  previewId,
-}: {
-  email: string;
-  previewId: string;
-}) {
-  // 1) Load preview
-  const p = await getPreview(previewId);
-  if (!p) throw new Error(`Preview not found: ${previewId}`);
-
-  // 2) Parse rows
-  let rows: Array<{ symbol: string; weight: number }> = [];
+// ✅ Always JSON-safe helper
+function safeJson(obj: any) {
   try {
-    const raw = p.rows;
-    const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
-    rows = (arr as any[]).map((r) => ({
-      symbol: String(r.symbol || "").toUpperCase(),
-      weight: Number(r.weight || 0),
-    }));
+    return JSON.stringify(obj);
   } catch {
-    rows = [];
+    return "{}";
   }
-
-  // 3) Pick grade
-  const grade =
-    typeof p.grade_adjusted === "number"
-      ? p.grade_adjusted.toFixed(1)
-      : typeof p.grade_base === "number"
-      ? p.grade_base.toFixed(1)
-      : "—";
-
-  // 4) Generate PDF buffer
-  const pdfBuffer = await renderPdfBuffer({
-    provider: p.provider,
-    provider_display: p.provider_display,
-    profile: p.profile,
-    grade,
-    rows,
-  });
-
-  // 5) Email
-  const html = `
-    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
-      <p>Thanks for your purchase!</p>
-      <p>Your personalized 401(k) report is attached.</p>
-      <p style="font-size:12px;color:#666">Kenai Investments Inc.</p>
-    </div>
-  `;
-
-  await sendReportEmail({
-    to: email,
-    subject: "Your GradeYour401k Report",
-    html,
-    attachments: [
-      {
-        filename: "GradeYour401k-Report.pdf",
-        content: pdfBuffer,
-        contentType: "application/pdf",
-      },
-    ],
-  });
-
-  return { ok: true };
 }
 
-// ---------- POST (preferred) ----------
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json();
     const email = String(body.email || "").trim();
     const previewId = String(body.previewId || "").trim();
 
     if (!email || !previewId) {
       return NextResponse.json(
-        { error: "Missing email or previewId" },
+        { ok: false, error: "Missing email or previewId" },
         { status: 400 }
       );
     }
 
-    const out = await handleGenerateAndEmail({ email, previewId });
-    return NextResponse.json(out);
-  } catch (err: any) {
-    console.error("[report generate-and-email] error:", err);
-    return NextResponse.json(
-      { error: err?.message || "Internal error" },
-      { status: 500 }
+    // Fetch preview data
+    const r = await sql(
+      `SELECT id, provider_display, profile, grade_adjusted, grade_base
+       FROM public.previews
+       WHERE id::text = $1
+       LIMIT 1`,
+      [previewId]
     );
-  }
-}
 
-// ---------- GET (manual testing) ----------
-// e.g. /api/report/generate-and-email?email=you@site.com&previewId=UUID
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const email = String(searchParams.get("email") || "").trim();
-    const previewId = String(searchParams.get("previewId") || "").trim();
-
-    if (!email || !previewId) {
+    const p = r.rows?.[0];
+    if (!p) {
       return NextResponse.json(
-        { error: "Missing email or previewId" },
-        { status: 400 }
+        { ok: false, error: `Preview not found (${previewId})` },
+        { status: 404 }
       );
     }
 
-    const out = await handleGenerateAndEmail({ email, previewId });
-    return NextResponse.json(out);
+    // Compute grade
+    const grade =
+      typeof p.grade_adjusted === "number"
+        ? p.grade_adjusted.toFixed(1)
+        : typeof p.grade_base === "number"
+        ? p.grade_base.toFixed(1)
+        : "—";
+
+    // ✅ Create a basic PDF using pdf-lib (safe for Vercel, no AFM fonts)
+    const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([600, 780]);
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    page.drawText("401(k) Report", {
+      x: 50,
+      y: 720,
+      size: 24,
+      font,
+      color: rgb(0.1, 0.3, 0.6),
+    });
+
+    page.drawText(`Provider: ${p.provider_display || "—"}`, {
+      x: 50,
+      y: 680,
+      size: 14,
+      font,
+    });
+
+    page.drawText(`Profile: ${p.profile || "—"}`, {
+      x: 50,
+      y: 660,
+      size: 14,
+      font,
+    });
+
+    page.drawText(`Grade: ${grade} / 5`, {
+      x: 50,
+      y: 640,
+      size: 16,
+      font,
+      color: rgb(0.2, 0.6, 0.2),
+    });
+
+    page.drawText(
+      "This report provides your personalized 401(k) grade and profile summary.",
+      {
+        x: 50,
+        y: 600,
+        size: 12,
+        font,
+      }
+    );
+
+    const pdfBytes = await pdfDoc.save();
+    const pdfBase64 = Buffer.from(pdfBytes).toString("base64");
+
+    // ✅ Send email via Resend
+    const subject = `Your 401(k) Report — Grade ${grade}/5`;
+    const textBody = `Hi there,
+
+Your personalized 401(k) report is attached as a PDF.
+
+Provider: ${p.provider_display || "—"}
+Profile: ${p.profile || "—"}
+Grade: ${grade}/5
+
+Thank you for using GradeYour401k.com!
+
+— Kenai Investments Team
+`;
+
+    await resend.emails.send({
+      from: "reports@gradeyour401k.com",
+      to: email,
+      subject,
+      text: textBody,
+      attachments: [
+        {
+          filename: `401k_Report_${previewId}.pdf`,
+          content: pdfBase64,
+        },
+      ],
+    });
+
+    console.log(`[generate-and-email] PDF emailed to ${email}`);
+
+    return NextResponse.json({
+      ok: true,
+      email,
+      previewId,
+      grade,
+    });
   } catch (err: any) {
-    console.error("[report generate-and-email GET] error:", err);
+    console.error("[generate-and-email] error:", err);
     return NextResponse.json(
-      { error: err?.message || "Internal error" },
+      { ok: false, error: err?.message || "PDF generation failed" },
       { status: 500 }
     );
   }
