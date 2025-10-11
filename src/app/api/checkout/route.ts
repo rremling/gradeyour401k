@@ -1,72 +1,100 @@
 // src/app/api/checkout/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
-export const dynamic = "force-dynamic";
+const stripeSecret = process.env.STRIPE_SECRET_KEY;
+const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME || process.env.STRIPE_PRICE_ID_DEFAULT;
+const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL;
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+if (!stripeSecret) {
+  throw new Error("Missing STRIPE_SECRET_KEY");
+}
+
+const stripe = new Stripe(stripeSecret, {
   apiVersion: "2024-06-20",
 });
 
-const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL || "https://www.gradeyour401k.com";
+type Body = {
+  planKey?: "one_time" | "annual";
+  previewId?: string;
+  promotionCodeId?: string; // optional Stripe Promotion Code id
+};
 
-const PRICE_ONE_TIME = process.env.STRIPE_PRICE_ID_ONE_TIME!;
-const PRICE_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL!;
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const { planKey, previewId, promotionCodeId } = await req.json();
+    const { planKey, previewId, promotionCodeId } = (await req.json()) as Body;
 
-    if (!planKey || !previewId) {
+    if (!planKey || (planKey !== "one_time" && planKey !== "annual")) {
+      return NextResponse.json({ error: "Invalid planKey" }, { status: 400 });
+    }
+    if (!previewId) {
+      return NextResponse.json({ error: "Missing previewId" }, { status: 400 });
+    }
+
+    // Choose price & mode
+    const priceId =
+      planKey === "one_time" ? PRICE_ONE_TIME : PRICE_ANNUAL;
+
+    if (!priceId) {
       return NextResponse.json(
-        { error: "Missing planKey or previewId" },
-        { status: 400 }
+        { error: `Missing Stripe price id for plan ${planKey}. Set STRIPE_PRICE_ID_ONE_TIME / STRIPE_PRICE_ID_ANNUAL.` },
+        { status: 500 }
       );
     }
 
-    const priceId =
-      planKey === "annual"
-        ? PRICE_ANNUAL
-        : planKey === "one_time"
-        ? PRICE_ONE_TIME
-        : null;
+    const mode: "payment" | "subscription" =
+      planKey === "one_time" ? "payment" : "subscription";
 
-    if (!priceId) {
-      return NextResponse.json({ error: "Invalid planKey" }, { status: 400 });
-    }
-
-    // Build params so we only include ONE of the promo fields.
-    const params: Stripe.Checkout.SessionCreateParams = {
-      mode: "payment",
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${SITE_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${SITE_URL}/pricing`,
+    // Base session params (shared)
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+      mode,
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      // IMPORTANT: pass session_id to success page
+      success_url: `https://www.gradeyour401k.com/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://www.gradeyour401k.com/pricing`,
+      // Keep the metadata small & clear; webhook will read these
       metadata: {
         plan_key: planKey,
         preview_id: previewId,
       },
     };
 
-    if (promotionCodeId && String(promotionCodeId).trim() !== "") {
-      // Use an explicit promotion code -> set discounts, DO NOT set allow_promotion_codes
-      params.discounts = [{ promotion_code: String(promotionCodeId) }];
+    // Apply promotions per Stripe rules:
+    // - EITHER `discounts` (when we already validated and have a promotion_code id)
+    // - OR `allow_promotion_codes: true` (let user type one at checkout)
+    if (promotionCodeId) {
+      (sessionParams as any).discounts = [{ promotion_code: promotionCodeId }];
     } else {
-      // Let the customer enter a code at checkout -> set allow_promotion_codes, DO NOT set discounts
-      params.allow_promotion_codes = true;
+      (sessionParams as any).allow_promotion_codes = true;
     }
 
-    const session = await stripe.checkout.sessions.create(params);
-    return NextResponse.json({ url: session.url }, { status: 200 });
+    // Create session
+    const session = await stripe.checkout.sessions.create(sessionParams);
+
+    if (!session?.url) {
+      return NextResponse.json(
+        { error: "Failed to create checkout session" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ url: session.url });
   } catch (err: any) {
-    console.error("[checkout] failed:", err);
-    return NextResponse.json(
-      { error: "Checkout failed. " + (err?.message || "") },
-      { status: 500 }
-    );
+    console.error("[checkout] error:", err);
+    const msg =
+      typeof err?.message === "string"
+        ? err.message
+        : "Checkout failed. Please try again.";
+    return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
 
+// (Optional) GET: quick ping for health checks
 export async function GET() {
-  return NextResponse.json({ ok: true, endpoint: "checkout" });
+  return NextResponse.json({ ok: true, endpoint: "/api/checkout" });
 }
