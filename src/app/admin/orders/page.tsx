@@ -2,146 +2,191 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { readAdminToken, clearAdminToken } from "@/lib/admin";
+import Link from "next/link";
 
-type Order = {
+type OrderRow = {
   id: string;
   email: string | null;
   plan_key: string | null;
   status: string | null;
   preview_id: string | null;
   stripe_session_id: string | null;
-  created_at: string;
+  created_at: string; // ISO
   next_due_1: string | null;
 };
 
 export default function AdminOrdersPage() {
-  const [token, setToken] = useState("");
-  const [orders, setOrders] = useState<Order[] | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [orders, setOrders] = useState<OrderRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [resending, setResending] = useState<string | null>(null);
+  const [resent, setResent] = useState<Record<string, boolean>>({});
 
-  // load saved token
   useEffect(() => {
-    const t = localStorage.getItem("gy4k_admin_token") || "";
+    const t = readAdminToken();
     setToken(t);
+    if (!t) return;
+    load(t);
   }, []);
 
-  async function load() {
+  async function load(t: string) {
+    setRefreshing(true);
     setError(null);
-    setLoading(true);
-    setOrders(null);
     try {
       const res = await fetch("/api/admin/orders", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { Authorization: `Bearer ${t}` },
+        cache: "no-store",
       });
-      const data = await res.json();
       if (!res.ok) {
-        throw new Error(`${data?.error || res.statusText} (http ${res.status})`);
+        setError(`Error loading orders: ${res.status} ${res.statusText}`);
+        setOrders(null);
+      } else {
+        const data = await res.json();
+        setOrders(Array.isArray(data?.orders) ? data.orders : []);
       }
-      setOrders(data.orders || []);
     } catch (e: any) {
-      setError(e?.message || "Failed to load");
+      setError(e?.message || "Network error");
+      setOrders(null);
     } finally {
-      setLoading(false);
+      setRefreshing(false);
     }
   }
 
-  function saveToken(v: string) {
-    setToken(v);
-    localStorage.setItem("gy4k_admin_token", v);
-  }
-
-  async function resend(previewId: string | null, email: string | null) {
-    setError(null);
-    if (!previewId) {
-      setError("Missing preview_id for this order.");
+  async function onResend(o: OrderRow) {
+    if (!token) return;
+    if (!o.email || !o.preview_id) {
+      setError("Missing destination email or preview_id");
       return;
     }
+    setResending(o.id);
+    setError(null);
     try {
       const res = await fetch("/api/report/generate-and-email", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ previewId }),
+        body: JSON.stringify({
+          email: o.email,
+          previewId: o.preview_id,
+          sessionId: o.stripe_session_id || undefined,
+        }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Resend failed");
-      alert("Report re-sent!");
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || !data?.ok) {
+        setError(`Resend failed: ${data?.error || res.statusText}`);
+      } else {
+        setResent((r) => ({ ...r, [o.id]: true }));
+      }
     } catch (e: any) {
-      setError(e?.message || "Resend failed");
+      setError(e?.message || "Network error");
+    } finally {
+      setResending(null);
     }
   }
 
-  return (
-    <main className="mx-auto max-w-5xl p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Admin · Orders</h1>
+  function onLogout() {
+    clearAdminToken();
+    window.location.href = "/admin/login";
+  }
 
-      <div className="rounded border p-4 bg-white space-y-3">
-        <label className="text-sm font-medium">Admin Token</label>
-        <div className="flex gap-2">
-          <input
-            className="border rounded p-2 flex-1"
-            type="password"
-            placeholder="Paste ADMIN_TOKEN"
-            value={token}
-            onChange={(e) => saveToken(e.target.value)}
-          />
-          <button
-            onClick={load}
-            className="rounded bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
-            disabled={loading}
+  if (!token) {
+    return (
+      <main className="mx-auto max-w-md p-6">
+        <div className="rounded-lg border bg-white p-5 space-y-3 text-center">
+          <p className="text-sm">You’re not logged in.</p>
+          <Link
+            href="/admin/login"
+            className="inline-block rounded-lg bg-blue-600 text-white px-4 py-2 hover:bg-blue-700"
           >
-            {loading ? "Loading…" : "Refresh"}
+            Go to Admin Login
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-6xl p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Orders</h1>
+        <div className="flex gap-2">
+          <button
+            onClick={() => load(token)}
+            disabled={refreshing}
+            className="rounded-md border px-3 py-2 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+          <button
+            onClick={onLogout}
+            className="rounded-md border px-3 py-2 hover:bg-gray-50"
+          >
+            Logout
           </button>
         </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
 
-      <div className="rounded border p-4 bg-white">
-        {orders === null ? (
-          <p className="text-sm text-gray-600">No data yet. Click Refresh.</p>
-        ) : orders.length === 0 ? (
-          <p className="text-sm text-gray-600">No orders found.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left border-b">
-                  <th className="py-2 pr-4">Created</th>
-                  <th className="py-2 pr-4">Email</th>
-                  <th className="py-2 pr-4">Plan</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Preview ID</th>
-                  <th className="py-2 pr-4">Session</th>
-                  <th className="py-2 pr-4">Actions</th>
+      {error && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-2">
+          {error}
+        </div>
+      )}
+
+      {!orders ? (
+        <div className="text-sm text-gray-600">Loading…</div>
+      ) : orders.length === 0 ? (
+        <div className="text-sm text-gray-600">No orders found.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left border-b">
+                <th className="p-2">Created</th>
+                <th className="p-2">Email</th>
+                <th className="p-2">Plan</th>
+                <th className="p-2">Status</th>
+                <th className="p-2">Preview</th>
+                <th className="p-2">Session</th>
+                <th className="p-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.id} className="border-b">
+                  <td className="p-2 whitespace-nowrap">
+                    {new Date(o.created_at).toLocaleString()}
+                  </td>
+                  <td className="p-2">{o.email ?? "—"}</td>
+                  <td className="p-2">{o.plan_key ?? "—"}</td>
+                  <td className="p-2">{o.status ?? "—"}</td>
+                  <td className="p-2">{o.preview_id ?? "—"}</td>
+                  <td className="p-2">{o.stripe_session_id ?? "—"}</td>
+                  <td className="p-2">
+                    <button
+                      onClick={() => onResend(o)}
+                      disabled={resending === o.id}
+                      className={[
+                        "rounded-md px-3 py-1 text-white",
+                        resent[o.id]
+                          ? "bg-green-600"
+                          : "bg-blue-600 hover:bg-blue-700",
+                        resending === o.id ? "opacity-50" : "",
+                      ].join(" ")}
+                      title={resent[o.id] ? "Sent" : "Resend PDF"}
+                    >
+                      {resending === o.id ? "Sending…" : resent[o.id] ? "Sent" : "Resend"}
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {orders.map((o) => (
-                  <tr key={o.id} className="border-b">
-                    <td className="py-2 pr-4">{new Date(o.created_at).toLocaleString()}</td>
-                    <td className="py-2 pr-4">{o.email || "—"}</td>
-                    <td className="py-2 pr-4">{o.plan_key || "—"}</td>
-                    <td className="py-2 pr-4">{o.status || "—"}</td>
-                    <td className="py-2 pr-4">{o.preview_id || "—"}</td>
-                    <td className="py-2 pr-4">{o.stripe_session_id || "—"}</td>
-                    <td className="py-2 pr-4">
-                      <button
-                        className="rounded border px-3 py-1 hover:bg-gray-50"
-                        onClick={() => resend(o.preview_id, o.email)}
-                      >
-                        Re-send
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </main>
   );
 }
