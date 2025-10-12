@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getMarketRegime } from "@/lib/market";
-import { buildReportPDF } from "@/lib/pdf";
+import { generatePdfBuffer } from "@/lib/pdf";
 import { sendReportEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
