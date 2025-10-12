@@ -295,7 +295,7 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
       </a>
     </div>
 
-    <p style="margin:0 0 16px 0;">Questions? Just reply to this email—happy to help.</p>
+    <p style="margin:0 0 16px 0;">Questions? Just give us a call—happy to help.</p>
     <p style="margin:0 0 8px 0;">— GradeYour401k</p>
 
     <hr style="border:none;border-top:1px solid #e6e6e6;margin:16px 0;" />
