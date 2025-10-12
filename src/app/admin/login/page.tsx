@@ -1,38 +1,70 @@
-import { NextResponse } from "next/server";
-import { Pool } from "pg";
+// src/app/admin/login/page.tsx
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+export default function AdminLoginPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const returnTo = sp.get("returnTo") || "/admin/orders";
 
-function isAuthorized(req: Request): boolean {
-  const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
-  const auth = req.headers.get("authorization") || "";
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  const headerToken = m ? m[1] : "";
+  const [token, setToken] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Accept either the cookie set by /api/admin/session, or a matching Bearer token
-  const cookie = req.headers.get("cookie") || "";
-  const hasCookie = /(?:^|;\s*)admin_session=ok(?:;|$)/.test(cookie);
-
-  return hasCookie || (!!ADMIN_TOKEN && headerToken === ADMIN_TOKEN);
-}
-
-export async function GET(req: Request) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  async function onLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || "Unauthorized");
+      }
+      router.replace(returnTo);
+    } catch (e: any) {
+      setErr(e?.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  // latest first
-  const sql = `
-    SELECT id, email, plan_key, status, preview_id, stripe_session_id, created_at, next_due_1
-    FROM public.orders
-    ORDER BY created_at DESC
-    LIMIT 200
-  `;
-  const result = await pool.query(sql);
-  return NextResponse.json({ ok: true, orders: result.rows });
+  return (
+    <main className="mx-auto max-w-sm p-6">
+      <h1 className="text-xl font-semibold text-center mb-4">Admin Login</h1>
+
+      <form onSubmit={onLogin} className="space-y-4 rounded-lg border p-4 bg-white">
+        <div>
+          <label className="block text-sm font-medium">Admin token</label>
+          <input
+            className="mt-1 w-full border rounded-md p-2"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="Enter ADMIN_TOKEN"
+            autoComplete="off"
+          />
+        </div>
+
+        {err && (
+          <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+            {err}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading || !token.trim()}
+          className="w-full rounded-md bg-blue-600 text-white py-2 hover:bg-blue-700 disabled:opacity-50"
+        >
+          {loading ? "Logging in…" : "Login"}
+        </button>
+      </form>
+    </main>
+  );
 }
