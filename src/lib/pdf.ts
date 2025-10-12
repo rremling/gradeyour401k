@@ -174,7 +174,7 @@ function makeDefaultOverlay(gradeNum: number | null, profile: string): MarketOve
 
   const actions = [
     "Implement tilts using the lowest-cost, broadest funds available.",
-    "Keep any tactical sleeve ≤ 10% of portfolio weight.",
+    "Keep any tactical sleeve <= 10% of portfolio weight.",
   ];
 
   return { summary, tilts, actions };
