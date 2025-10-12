@@ -5,14 +5,14 @@ export type Holding = { symbol: string; weight: number };
 export type PdfArgs = {
   provider: string;
   profile: string;
-  /** Pass either letter grade (e.g., "A-") OR numeric "4.2 / 5" — we'll render it nicely */
-  grade: string;
+  /** Can be number (e.g., 4.2), string "4.2 / 5", or letter "A-" */
+  grade: number | string | null;
   holdings: Holding[];
-  /** Optional: external URL or public path (e.g., "/logo.png"). If omitted, no logo is shown. */
+  /** Optional: external URL or public path (e.g., "/logo.png") */
   logoUrl?: string;
-  /** Optional display name or client label */
+  /** Optional: display name on the header line */
   clientName?: string;
-  /** Report date; defaults to today (MM/DD/YYYY) */
+  /** Optional: ISO string or human date; default is today */
   reportDate?: string;
 };
 
@@ -20,7 +20,7 @@ const COLORS = {
   ink: rgb(0.12, 0.12, 0.12),
   sub: rgb(0.35, 0.35, 0.35),
   line: rgb(0.85, 0.85, 0.85),
-  brand: rgb(0.05, 0.35, 0.75), // Kenai/GradeYour401k accent
+  brand: rgb(0.05, 0.35, 0.75),
   badge: rgb(0.05, 0.35, 0.75),
   footer: rgb(0.45, 0.45, 0.45),
 };
@@ -31,6 +31,19 @@ function todayMMDDYYYY() {
   const dd = String(d.getDate()).padStart(2, "0");
   const yyyy = String(d.getFullYear());
   return `${mm}/${dd}/${yyyy}`;
+}
+
+function normalizeGrade(g: number | string | null) {
+  if (g === null || g === undefined) return "—";
+  if (typeof g === "number") return `${g.toFixed(1)}/5`;
+  const trimmed = g.trim();
+  const letter = /^[A-D][+-]?$|^F$/i.test(trimmed);
+  if (letter) return trimmed.toUpperCase();
+  const num = trimmed.match(/(\d+(\.\d+)?)\s*\/\s*5/);
+  if (num) return `${num[1]}/5`;
+  const maybeNum = Number(trimmed);
+  if (!Number.isNaN(maybeNum)) return `${maybeNum.toFixed(1)}/5`;
+  return trimmed;
 }
 
 async function loadLogoBytes(logoUrl?: string): Promise<Uint8Array | null> {
@@ -50,12 +63,12 @@ export async function generatePdfBuffer({
   profile,
   grade,
   holdings,
-  logoUrl, // e.g., "https://i.imgur.com/DMCbj99.png"
+  logoUrl,
   clientName,
   reportDate,
 }: PdfArgs): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
-  let page = pdf.addPage([612, 792]); // Letter: 8.5 x 11 in @ 72 dpi
+  let page = pdf.addPage([612, 792]); // Letter
   let { width, height } = page.getSize();
 
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -64,7 +77,6 @@ export async function generatePdfBuffer({
   const logoBytes = await loadLogoBytes(logoUrl);
   const logoImg = logoBytes ? await pdf.embedPng(logoBytes) : null;
 
-  // Layout helpers
   const MARGIN_X = 40;
   const TOP_Y = height - 40;
   const BOTTOM_Y = 40;
@@ -109,107 +121,85 @@ export async function generatePdfBuffer({
     y -= 18;
   };
 
-  // Header block
-  const header = () => {
-    const title = "GradeYour401k — Personalized Report";
-    const titleSize = 20;
+  // Header
+  const title = "GradeYour401k — Personalized Report";
+  const titleSize = 20;
 
-    // Logo
-    let logoWidth = 0;
-    if (logoImg) {
-      const LOGO_H = 36;
-      const aspect = logoImg.width / logoImg.height;
-      logoWidth = LOGO_H * aspect;
-      page.drawImage(logoImg, {
-        x: MARGIN_X,
-        y: y - LOGO_H,
-        width: logoWidth,
-        height: LOGO_H,
-      });
-    }
-
-    // Title
-    const titleX = logoImg ? MARGIN_X + logoWidth + 12 : MARGIN_X;
-    page.drawText(title, {
-      x: titleX,
-      y: y - 4,
-      size: titleSize,
-      font: bold,
-      color: COLORS.brand,
+  // Logo
+  let logoWidth = 0;
+  if (logoImg) {
+    const LOGO_H = 36;
+    const aspect = logoImg.width / logoImg.height;
+    logoWidth = LOGO_H * aspect;
+    page.drawImage(logoImg, {
+      x: MARGIN_X,
+      y: y - LOGO_H,
+      width: logoWidth,
+      height: LOGO_H,
     });
+  }
 
-    // Grade badge (right side)
-    const badgeR = 20;
-    const cx = width - MARGIN_X - badgeR;
-    const cy = y - 2;
-    page.drawCircle({
-      x: cx,
-      y: cy,
-      size: badgeR,
-      color: COLORS.badge,
-    });
-    const gradeText = normalizeGrade(grade);
-    const gw = bold.widthOfTextAtSize(gradeText, 14);
-    page.drawText(gradeText, {
-      x: cx - gw / 2,
-      y: cy - 6,
-      size: 14,
-      font: bold,
-      color: rgb(1, 1, 1),
-    });
+  // Title
+  const titleX = logoImg ? MARGIN_X + logoWidth + 12 : MARGIN_X;
+  page.drawText(title, {
+    x: titleX,
+    y: y - 4,
+    size: titleSize,
+    font: bold,
+    color: COLORS.brand,
+  });
 
-    y -= 46;
+  // Grade badge (right)
+  const badgeR = 20;
+  const cx = width - MARGIN_X - badgeR;
+  const cy = y - 2;
+  page.drawCircle({ x: cx, y: cy, size: badgeR, color: COLORS.badge });
+  const gradeText = normalizeGrade(grade);
+  const gw = bold.widthOfTextAtSize(gradeText, 14);
+  page.drawText(gradeText, { x: cx - gw / 2, y: cy - 6, size: 14, font: bold, color: rgb(1, 1, 1) });
 
-    // Meta line
-    const meta1 = clientName ? `Client: ${clientName}` : null;
-    const meta2 = `Date: ${reportDate || todayMMDDYYYY()}`;
-    const meta = [meta1, meta2].filter(Boolean).join("    •    ");
-    if (meta) {
-      page.drawText(meta, { x: MARGIN_X, y, size: 11, font, color: COLORS.sub });
-      y -= 12;
-    }
+  y -= 46;
 
-    // Divider
-    page.drawLine({
-      start: { x: MARGIN_X, y },
-      end: { x: width - MARGIN_X, y },
-      thickness: 0.8,
-      color: COLORS.line,
-    });
-    y -= 18;
-  };
+  // Meta
+  const metaLeft = clientName ? `Client: ${clientName}` : "";
+  const metaRight = `Date: ${
+    reportDate ? new Date(reportDate).toLocaleDateString() : todayMMDDYYYY()
+  }`;
+  const meta = [metaLeft, metaRight].filter(Boolean).join("    •    ");
+  if (meta) {
+    page.drawText(meta, { x: MARGIN_X, y, size: 11, font, color: COLORS.sub });
+    y -= 12;
+  }
 
-  const normalizeGrade = (g: string) => {
-    // Accept "A", "A-", "4.2 / 5", "4/5" — display succinctly
-    const trimmed = g.trim();
-    const letter = /^[A-D][+-]?$|^F$/.test(trimmed.toUpperCase());
-    if (letter) return trimmed.toUpperCase();
-    const num = trimmed.match(/(\d+(\.\d+)?)\s*\/\s*5/);
-    if (num) return `${num[1]}/5`;
-    return trimmed;
-  };
+  page.drawLine({
+    start: { x: MARGIN_X, y },
+    end: { x: width - MARGIN_X, y },
+    thickness: 0.8,
+    color: COLORS.line,
+  });
+  y -= 18;
 
+  // Summary
+  sectionTitle("Summary");
   const keyValue = (label: string, value: string) => {
-    const labelSize = 12;
-    const valueSize = 12;
-    const gap = 6;
-
-    page.drawText(label, { x: MARGIN_X, y, size: labelSize, font: bold, color: COLORS.ink });
-    const lw = bold.widthOfTextAtSize(label, labelSize);
-    page.drawText(value, { x: MARGIN_X + lw + gap, y, size: valueSize, font, color: COLORS.ink });
+    page.drawText(label, { x: MARGIN_X, y, size: 12, font: bold, color: COLORS.ink });
+    const lw = bold.widthOfTextAtSize(label, 12);
+    page.drawText(value, { x: MARGIN_X + lw + 6, y, size: 12, font, color: COLORS.ink });
     y -= 18;
   };
+  keyValue("Provider:", provider || "—");
+  keyValue("Profile:", profile || "—");
+  keyValue("Preliminary Grade:", gradeText);
+  y -= 6;
 
+  // Holdings
   const holdingsTable = (rows: Holding[]) => {
     sectionTitle("Current Holdings");
-
-    // Column layout
     const colSymbolX = MARGIN_X;
     const colWeightX = width - MARGIN_X - 90;
     const rowH = 18;
 
-    // Header
-    const headerY = y;
+    // header
     page.drawText("Symbol", { x: colSymbolX, y, size: 12, font: bold, color: COLORS.sub });
     page.drawText("Weight", { x: colWeightX, y, size: 12, font: bold, color: COLORS.sub });
     y -= rowH;
@@ -231,7 +221,6 @@ export async function generatePdfBuffer({
       if (y < BOTTOM_Y + 40) {
         newPage();
         sectionTitle("Current Holdings (cont.)");
-        // re-draw header
         page.drawText("Symbol", { x: colSymbolX, y, size: 12, font: bold, color: COLORS.sub });
         page.drawText("Weight", { x: colWeightX, y, size: 12, font: bold, color: COLORS.sub });
         y -= rowH;
@@ -253,19 +242,8 @@ export async function generatePdfBuffer({
     }
   };
 
-  // ===== Render =====
-  header();
+  holdingsTable(holdings || []);
 
-  sectionTitle("Summary");
-  keyValue("Provider:", provider);
-  keyValue("Profile:", profile);
-  keyValue("Preliminary Grade:", normalizeGrade(grade));
-  y -= 6;
-
-  holdingsTable(holdings);
-
-  // Footer for last page
   drawFooter(page);
-
   return await pdf.save();
 }
