@@ -1,42 +1,69 @@
 // src/app/api/admin/orders/route.ts
-import { NextResponse } from "next/server";
-import { Pool } from "pg";
-import { ADMIN_TOKEN } from "@/lib/admin";
+"use client";
 
-const DATABASE_URL = process.env.DATABASE_URL || "";
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
 
 export const dynamic = "force-dynamic";
 
-function unauthorized() {
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-}
+export default function AdminLoginPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const returnTo = sp.get("returnTo") || "/admin/orders";
 
-export async function GET(req: Request) {
-  // Validate admin token from Authorization header
-  const auth = req.headers.get("authorization") || "";
-  const provided = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (!ADMIN_TOKEN || provided !== ADMIN_TOKEN) {
-    return unauthorized();
+  const [token, setToken] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Unauthorized");
+      }
+      router.push(returnTo);
+    } catch (err: any) {
+      setError(err?.message || "Login failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  const sql = `
-    SELECT id::text, email, plan_key, status, preview_id,
-           stripe_session_id, created_at, next_due_1
-    FROM public.orders
-    ORDER BY created_at DESC
-    LIMIT 200
-  `;
-  try {
-    const res = await pool.query(sql);
-    return NextResponse.json({ ok: true, orders: res.rows });
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "DB error" },
-      { status: 500 }
-    );
-  }
+  return (
+    <main className="mx-auto max-w-sm p-6">
+      <h1 className="text-xl font-semibold text-center mb-4">Admin Login</h1>
+
+      <form onSubmit={onLogin} className="space-y-4 rounded-lg border p-4 bg-white">
+        <label className="block text-sm font-medium">Admin token</label>
+        <input
+          className="w-full border rounded-md p-2"
+          placeholder="Enter admin token"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+        />
+
+        <button
+          type="submit"
+          disabled={busy || !token}
+          className="w-full rounded-md bg-blue-600 text-white py-2 hover:bg-blue-700 disabled:opacity-50"
+        >
+          {busy ? "Logging in…" : "Login"}
+        </button>
+
+        {error && (
+          <div className="rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+      </form>
+    </main>
+  );
 }
