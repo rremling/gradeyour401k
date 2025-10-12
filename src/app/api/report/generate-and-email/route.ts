@@ -308,7 +308,7 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
       <a href="https://gradeyour401k.com" style="color:#0b59c7;text-decoration:none;">gradeyour401k.com</a>.
     </p>
   </div>
-`
+`,
 
      attachments: [{ filename: "GradeYour401k.pdf", content: Buffer.from(pdfBytes) }],
 
