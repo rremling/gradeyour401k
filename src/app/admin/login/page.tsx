@@ -2,19 +2,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export default function AdminLoginPage() {
   const router = useRouter();
-  const params = useSearchParams();
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Optional: prefill from ?token= in URL
+  // (Optional) Prefill from ?token= without useSearchParams (avoids Suspense requirement)
   useEffect(() => {
-    const t = params.get("token");
-    if (t) setToken(t);
-  }, [params]);
+    try {
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        const t = url.searchParams.get("token");
+        if (t) setToken(t);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   function handleLogin(e: React.FormEvent) {
     e.preventDefault();
