@@ -1,9 +1,11 @@
 // src/app/api/admin/orders/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { Pool } from "pg";
+import { ADMIN_TOKEN } from "@/lib/admin";
 
+const DATABASE_URL = process.env.DATABASE_URL || "";
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
@@ -13,18 +15,28 @@ function unauthorized() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
+  // Validate admin token from Authorization header
   const auth = req.headers.get("authorization") || "";
-  if (!auth.startsWith("Bearer ")) return unauthorized();
-  const token = auth.slice(7); // after "Bearer "
-  if (!process.env.ADMIN_TOKEN || token !== process.env.ADMIN_TOKEN) return unauthorized();
+  const provided = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!ADMIN_TOKEN || provided !== ADMIN_TOKEN) {
+    return unauthorized();
+  }
 
   const sql = `
-    SELECT id, email, plan_key, status, preview_id, stripe_session_id, created_at, next_due_1
+    SELECT id::text, email, plan_key, status, preview_id,
+           stripe_session_id, created_at, next_due_1
     FROM public.orders
     ORDER BY created_at DESC
-    LIMIT 100
+    LIMIT 200
   `;
-  const rows = (await pool.query(sql)).rows;
-  return NextResponse.json({ ok: true, rows });
+  try {
+    const res = await pool.query(sql);
+    return NextResponse.json({ ok: true, orders: res.rows });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message || "DB error" },
+      { status: 500 }
+    );
+  }
 }
