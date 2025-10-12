@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { generatePdfBuffer } from "@lib/pdf";
+
 
 export const dynamic = "force-dynamic";
 
@@ -102,56 +103,6 @@ function parseRows(raw: unknown): Array<{ symbol: string; weight: number }> {
   }
 }
 
-// Generate a simple, dependency-light PDF with pdf-lib
-async function generatePdfBuffer(opts: {
-  provider: string;
-  profile: string;
-  grade: number | null;
-  rows: Array<{ symbol: string; weight: number }>;
-  createdAt?: string;
-}) {
-  const doc = await PDFDocument.create();
-  const page = doc.addPage([612, 792]); // Letter-ish
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-
-  const title = "GradeYour401k — Personalized Report";
-  const providerLine = `Provider: ${opts.provider || "—"}`;
-  const profileLine = `Profile: ${opts.profile || "—"}`;
-  const gradeLine = `Preliminary Grade: ${opts.grade !== null ? `${opts.grade.toFixed(1)} / 5` : "—"}`;
-  const dateLine = `Created: ${opts.createdAt ? new Date(opts.createdAt).toLocaleString() : new Date().toLocaleString()}`;
-
-  const { width } = page.getSize();
-  const margin = 50;
-  let y = 742;
-
-  page.drawText(title, { x: margin, y, size: 20, font, color: rgb(0.1, 0.1, 0.1) });
-  y -= 28;
-  page.drawText(providerLine, { x: margin, y, size: 12, font });
-  y -= 18;
-  page.drawText(profileLine, { x: margin, y, size: 12, font });
-  y -= 18;
-  page.drawText(gradeLine, { x: margin, y, size: 12, font });
-  y -= 18;
-  page.drawText(dateLine, { x: margin, y, size: 12, font });
-  y -= 28;
-
-  page.drawText("Holdings", { x: margin, y, size: 14, font });
-  y -= 18;
-  const rows = opts.rows.slice(0, 40); // keep it short
-  if (rows.length === 0) {
-    page.drawText("No holdings provided.", { x: margin, y, size: 12, font });
-  } else {
-    for (const r of rows) {
-      const line = `${(Number(r.weight) || 0).toFixed(1).padStart(5, " ")}% ${String(r.symbol || "").toUpperCase()}`;
-      page.drawText(line, { x: margin, y, size: 11, font });
-      y -= 14;
-      if (y < 60) break;
-    }
-  }
-
-  const bytes = await doc.save();
-  return Buffer.from(bytes);
-}
 
 async function sendEmailViaResend(params: {
   to: string;
@@ -273,13 +224,16 @@ export async function POST(req: NextRequest) {
         ? preview.grade_base
         : null;
 
-    const pdf = await generatePdfBuffer({
-      provider: preview.provider_display || preview.provider || "",
-      profile: preview.profile || "",
-      grade,
-      rows,
-      createdAt: preview.created_at,
-    });
+    const pdfBytes = await generatePdfBuffer({
+  provider: preview.provider_display || preview.provider || "",
+  profile: preview.profile || "",
+  grade, // number | null is OK; the generator will format it
+  holdings: rows, // NOTE: renamed from rows -> holdings
+  logoUrl: "https://i.imgur.com/DMCbj99.png",
+  clientName: preview.profile || undefined,
+  reportDate: preview.created_at || undefined,
+});
+
 
     await sendEmailViaResend({
       to: toEmail,
@@ -296,7 +250,8 @@ export async function POST(req: NextRequest) {
           <p>&mdash; GradeYour401k</p>
         </div>
       `,
-      attachments: [{ filename: "GradeYour401k.pdf", content: pdf }],
+     attachments: [{ filename: "GradeYour401k.pdf", content: Buffer.from(pdfBytes) }],
+
     });
 
     return NextResponse.json({ ok: true, emailed: toEmail, previewId });
