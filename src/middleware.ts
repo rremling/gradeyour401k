@@ -1,11 +1,15 @@
+// middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Only guard /admin pages (but not /admin/login itself)
-  if (pathname.startsWith("/admin") && pathname !== "/admin/login") {
+  // Allow the login page itself
+  if (pathname === "/admin/login") return NextResponse.next();
+
+  // Guard all other /admin routes (pages & APIs)
+  if (pathname.startsWith("/admin")) {
     const hasSession = req.cookies.get("admin_session")?.value === "ok";
     if (!hasSession) {
       const url = req.nextUrl.clone();
