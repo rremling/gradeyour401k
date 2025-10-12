@@ -1,249 +1,30 @@
-// src/lib/pdf.ts
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-
-export type Holding = { symbol: string; weight: number };
-export type PdfArgs = {
-  provider: string;
-  profile: string;
-  /** Can be number (e.g., 4.2), string "4.2 / 5", or letter "A-" */
-  grade: number | string | null;
-  holdings: Holding[];
-  /** Optional: external URL or public path (e.g., "/logo.png") */
-  logoUrl?: string;
-  /** Optional: display name on the header line */
-  clientName?: string;
-  /** Optional: ISO string or human date; default is today */
-  reportDate?: string;
-};
-
-const COLORS = {
-  ink: rgb(0.12, 0.12, 0.12),
-  sub: rgb(0.35, 0.35, 0.35),
-  line: rgb(0.85, 0.85, 0.85),
-  brand: rgb(0.05, 0.35, 0.75),
-  badge: rgb(0.05, 0.35, 0.75),
-  footer: rgb(0.45, 0.45, 0.45),
-};
-
-function todayMMDDYYYY() {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const yyyy = String(d.getFullYear());
-  return `${mm}/${dd}/${yyyy}`;
-}
-
-function normalizeGrade(g: number | string | null) {
-  if (g === null || g === undefined) return "—";
-  if (typeof g === "number") return `${g.toFixed(1)}/5`;
-  const trimmed = g.trim();
-  const letter = /^[A-D][+-]?$|^F$/i.test(trimmed);
-  if (letter) return trimmed.toUpperCase();
-  const num = trimmed.match(/(\d+(\.\d+)?)\s*\/\s*5/);
-  if (num) return `${num[1]}/5`;
-  const maybeNum = Number(trimmed);
-  if (!Number.isNaN(maybeNum)) return `${maybeNum.toFixed(1)}/5`;
-  return trimmed;
-}
-
-async function loadLogoBytes(logoUrl?: string): Promise<Uint8Array | null> {
-  if (!logoUrl) return null;
-  try {
-    const res = await fetch(logoUrl);
-    if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    return new Uint8Array(buf);
-  } catch {
-    return null;
-  }
-}
-
-export async function generatePdfBuffer({
-  provider,
-  profile,
+const pdfBytes = await generatePdfBuffer({
+  provider: preview.provider_display || preview.provider || "",
+  profile: preview.profile || "",
   grade,
-  holdings,
-  logoUrl,
-  clientName,
-  reportDate,
-}: PdfArgs): Promise<Uint8Array> {
-  const pdf = await PDFDocument.create();
-  let page = pdf.addPage([612, 792]); // Letter
-  let { width, height } = page.getSize();
+  holdings: rows,
+  logoUrl: "https://i.imgur.com/DMCbj99.png",
+  clientName: preview.profile || undefined,
+  reportDate: preview.created_at || undefined,
 
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-
-  const logoBytes = await loadLogoBytes(logoUrl);
-  const logoImg = logoBytes ? await pdf.embedPng(logoBytes) : null;
-
-  const MARGIN_X = 40;
-  const TOP_Y = height - 40;
-  const BOTTOM_Y = 40;
-
-  let y = TOP_Y;
-
-  const drawFooter = (p = page) => {
-    const footer = "Kenai Investments, Inc. — www.kenaiinvest.com";
-    const w = font.widthOfTextAtSize(footer, 10);
-    p.drawLine({
-      start: { x: MARGIN_X, y: BOTTOM_Y + 18 },
-      end: { x: width - MARGIN_X, y: BOTTOM_Y + 18 },
-      thickness: 0.5,
-      color: COLORS.line,
-    });
-    p.drawText(footer, {
-      x: width - MARGIN_X - w,
-      y: BOTTOM_Y + 6,
-      size: 10,
-      font,
-      color: COLORS.footer,
-    });
-  };
-
-  const newPage = () => {
-    drawFooter(page);
-    page = pdf.addPage([612, 792]);
-    ({ width, height } = page.getSize());
-    y = height - 40;
-  };
-
-  const sectionTitle = (txt: string) => {
-    if (y < BOTTOM_Y + 80) newPage();
-    page.drawText(txt, { x: MARGIN_X, y, size: 14, font: bold, color: COLORS.ink });
-    y -= 10;
-    page.drawLine({
-      start: { x: MARGIN_X, y },
-      end: { x: width - MARGIN_X, y },
-      thickness: 0.8,
-      color: COLORS.line,
-    });
-    y -= 18;
-  };
-
-  // Header
-  const title = "GradeYour401k — Personalized Report";
-  const titleSize = 20;
-
-  // Logo
-  let logoWidth = 0;
-  if (logoImg) {
-    const LOGO_H = 36;
-    const aspect = logoImg.width / logoImg.height;
-    logoWidth = LOGO_H * aspect;
-    page.drawImage(logoImg, {
-      x: MARGIN_X,
-      y: y - LOGO_H,
-      width: logoWidth,
-      height: LOGO_H,
-    });
-  }
-
-  // Title
-  const titleX = logoImg ? MARGIN_X + logoWidth + 12 : MARGIN_X;
-  page.drawText(title, {
-    x: titleX,
-    y: y - 4,
-    size: titleSize,
-    font: bold,
-    color: COLORS.brand,
-  });
-
-  // Grade badge (right)
-  const badgeR = 20;
-  const cx = width - MARGIN_X - badgeR;
-  const cy = y - 2;
-  page.drawCircle({ x: cx, y: cy, size: badgeR, color: COLORS.badge });
-  const gradeText = normalizeGrade(grade);
-  const gw = bold.widthOfTextAtSize(gradeText, 14);
-  page.drawText(gradeText, { x: cx - gw / 2, y: cy - 6, size: 14, font: bold, color: rgb(1, 1, 1) });
-
-  y -= 46;
-
-  // Meta
-  const metaLeft = clientName ? `Client: ${clientName}` : "";
-  const metaRight = `Date: ${
-    reportDate ? new Date(reportDate).toLocaleDateString() : todayMMDDYYYY()
-  }`;
-  const meta = [metaLeft, metaRight].filter(Boolean).join("    •    ");
-  if (meta) {
-    page.drawText(meta, { x: MARGIN_X, y, size: 11, font, color: COLORS.sub });
-    y -= 12;
-  }
-
-  page.drawLine({
-    start: { x: MARGIN_X, y },
-    end: { x: width - MARGIN_X, y },
-    thickness: 0.8,
-    color: COLORS.line,
-  });
-  y -= 18;
-
-  // Summary
-  sectionTitle("Summary");
-  const keyValue = (label: string, value: string) => {
-    page.drawText(label, { x: MARGIN_X, y, size: 12, font: bold, color: COLORS.ink });
-    const lw = bold.widthOfTextAtSize(label, 12);
-    page.drawText(value, { x: MARGIN_X + lw + 6, y, size: 12, font, color: COLORS.ink });
-    y -= 18;
-  };
-  keyValue("Provider:", provider || "—");
-  keyValue("Profile:", profile || "—");
-  keyValue("Preliminary Grade:", gradeText);
-  y -= 6;
-
-  // Holdings
-  const holdingsTable = (rows: Holding[]) => {
-    sectionTitle("Current Holdings");
-    const colSymbolX = MARGIN_X;
-    const colWeightX = width - MARGIN_X - 90;
-    const rowH = 18;
-
-    // header
-    page.drawText("Symbol", { x: colSymbolX, y, size: 12, font: bold, color: COLORS.sub });
-    page.drawText("Weight", { x: colWeightX, y, size: 12, font: bold, color: COLORS.sub });
-    y -= rowH;
-    page.drawLine({
-      start: { x: MARGIN_X, y },
-      end: { x: width - MARGIN_X, y },
-      thickness: 0.5,
-      color: COLORS.line,
-    });
-    y -= 6;
-
-    if (!rows || rows.length === 0) {
-      page.drawText("No holdings provided.", { x: MARGIN_X, y, size: 12, font, color: COLORS.ink });
-      y -= rowH;
-      return;
-    }
-
-    for (const h of rows) {
-      if (y < BOTTOM_Y + 40) {
-        newPage();
-        sectionTitle("Current Holdings (cont.)");
-        page.drawText("Symbol", { x: colSymbolX, y, size: 12, font: bold, color: COLORS.sub });
-        page.drawText("Weight", { x: colWeightX, y, size: 12, font: bold, color: COLORS.sub });
-        y -= rowH;
-        page.drawLine({
-          start: { x: MARGIN_X, y },
-          end: { x: width - MARGIN_X, y },
-          thickness: 0.5,
-          color: COLORS.line,
-        });
-        y -= 6;
-      }
-      const symbol = String(h.symbol || "").toUpperCase().trim();
-      const weight = `${Number(h.weight || 0).toFixed(1)}%`;
-
-      page.drawText(symbol, { x: colSymbolX, y, size: 12, font, color: COLORS.ink });
-      page.drawText(weight, { x: colWeightX, y, size: 12, font, color: COLORS.ink });
-
-      y -= rowH;
-    }
-  };
-
-  holdingsTable(holdings || []);
-
-  drawFooter(page);
-  return await pdf.save();
-}
+  // Optional overrides
+  recommendations: [
+    "Consolidate overlapping large-cap funds to a single low-cost index.",
+    "Raise contribution rate to capture full employer match.",
+    "Set quarterly auto-rebalance if available in plan.",
+  ],
+  marketOverlay: {
+    summary: "Stay close to strategic targets; rebalance on drift. Keep any tactical sleeve modest.",
+    tilts: [
+      { label: "US Large Cap", direction: "Neutral", note: "Core anchor exposure" },
+      { label: "US Small/Mid", direction: "Overweight", note: "Quality tilt; accept volatility" },
+      { label: "International Developed", direction: "Neutral", note: "Diversification benefits" },
+      { label: "Emerging Markets", direction: "Underweight", note: "Selective exposure only" },
+      { label: "Investment-Grade Bonds", direction: "Neutral", note: "Ladder 1–5 yrs if available" },
+    ],
+    actions: [
+      "Express tilts using broad, low-cost funds.",
+      "Keep tactical sleeve ≤ 10% of portfolio weight.",
+    ],
+  },
+});
