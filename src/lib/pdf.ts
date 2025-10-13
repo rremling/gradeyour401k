@@ -251,7 +251,7 @@ export async function generatePdfBuffer({
     for (const h of holdings) {
       if (y < 60) newPage();
 
-      // (Option B) subtle row rule (no fill, no overlap)
+      // subtle row rule (no fill, no overlap)
       page.drawLine({
         start: { x: MARGIN_X, y: y - 2 },
         end: { x: width - MARGIN_X, y: y - 2 },
@@ -348,4 +348,4 @@ export async function generatePdfBuffer({
   for (const b of bullets) {
     if (y < 60) newPage();
     page.drawText("•", { x: MARGIN_X, y, size: BODY_SIZE, font });
-    const lines = wrapText(b, maxW - 12, font, BODY_SIZE);_
+    const lines = wrapText(b, maxW - 12, fo
