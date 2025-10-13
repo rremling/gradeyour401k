@@ -122,7 +122,7 @@ export async function GET(req: Request) {
 
     return json({ orders, nextCursor, meta: { id: map.id, total: map.total, created: map.created } });
   } catch (err: any) {
-    console.error("GET /api/admin/orders error:", err);
-    return json({ error: "Failed to load orders" }, { status: 500 });
-  }
+  console.error("GET /api/admin/orders error:", err);
+  // TEMP: don't crash the page; surface a hint to the UI
+  return NextResponse.json({ orders: [], _error: err?.code || err?.message || "DB error" }, { status: 200 });
 }
