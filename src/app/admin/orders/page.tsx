@@ -1,4 +1,3 @@
-// src/app/admin/orders/page.tsx
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import OrdersClient from "./OrdersClient";
@@ -15,7 +14,7 @@ export default async function Page() {
   const base = `${proto}://${host}`;
 
   let initialOrders: any[] = [];
-  let loadError: string | null = null;
+  let initialError: string | null = null;
 
   try {
     const res = await fetch(`${base}/api/admin/orders`, {
@@ -27,18 +26,17 @@ export default async function Page() {
       redirect("/admin/login?returnTo=/admin/orders");
     } else if (!res.ok) {
       const t = await res.text().catch(() => "");
-      loadError = `Orders API error ${res.status}`;
+      initialError = `Orders API error ${res.status}`;
       console.error("orders/page.tsx: API not ok:", res.status, t);
     } else {
       const j = await res.json().catch(() => ({} as any));
       initialOrders = Array.isArray(j?.orders) ? j.orders : [];
-      if (j?._error) loadError = String(j._error);
+      if (j?._error) initialError = String(j._error);
     }
   } catch (e: any) {
-    loadError = e?.message || "Unexpected error";
+    initialError = e?.message || "Unexpected error";
     console.error("orders/page.tsx: fetch failed:", e);
   }
 
-  // Pass a non-throwing hint to the client to render a banner
-  return <OrdersClient initialOrders={initialOrders} initialError={loadError} />;
+  return <OrdersClient initialOrders={initialOrders} initialError={initialError} />;
 }
