@@ -84,7 +84,15 @@ function recommendedByProfile(profile: string): string[] {
 }
 
 // draw right-aligned numeric text at xRight
-function drawRightAlignedText(page: any, text: string, xRight: number, y: number, size: number, font: any, color = rgb(0.1,0.1,0.1)) {
+function drawRightAlignedText(
+  page: any,
+  text: string,
+  xRight: number,
+  y: number,
+  size: number,
+  font: any,
+  color = rgb(0.1, 0.1, 0.1)
+) {
   const w = font.widthOfTextAtSize(text, size);
   page.drawText(text, { x: xRight - w, y, size, font, color });
 }
@@ -115,9 +123,9 @@ export async function generatePdfBuffer({
   function sectionRule() {
     page.drawLine({
       start: { x: MARGIN_X, y },
-      end:   { x: width - MARGIN_X, y },
+      end: { x: width - MARGIN_X, y },
       thickness: 0.5,
-      color: rgb(0.88,0.88,0.88),
+      color: rgb(0.88, 0.88, 0.88),
     });
     y -= 12;
   }
@@ -125,33 +133,39 @@ export async function generatePdfBuffer({
   // footer + page number
   function drawFooter() {
     const footer = "Kenai Investments Inc. — www.kenaiinvest.com";
-    const w = font.widthOfTextAtSize(footer, 10);
+    const fw = font.widthOfTextAtSize(footer, 10);
     page.drawText(footer, {
-      x: width - MARGIN_X - w,
+      x: width - MARGIN_X - fw,
       y: 30,
       size: 10,
       font,
       color: rgb(0.35, 0.35, 0.35),
     });
     const label = `Page ${pageIndex}`;
-    page.drawText(label, { x: MARGIN_X, y: 30, size: 10, font, color: rgb(0.35,0.35,0.35) });
+    page.drawText(label, { x: MARGIN_X, y: 30, size: 10, font, color: rgb(0.35, 0.35, 0.35) });
   }
 
   // new page helper with running header
   function newPage() {
-    drawFooter();            // finalize current page
+    drawFooter(); // finalize current page
     pageIndex += 1;
     page = pdf.addPage([612, 792]);
     ({ width, height } = page.getSize());
     y = 740;
 
     // running header line + label
-    page.drawText("GradeYour401k — Report", { x: MARGIN_X, y: 760, size: 10, font, color: rgb(0.35,0.35,0.35) });
+    page.drawText("GradeYour401k — Report", {
+      x: MARGIN_X,
+      y: 760,
+      size: 10,
+      font,
+      color: rgb(0.35, 0.35, 0.35),
+    });
     page.drawLine({
       start: { x: MARGIN_X, y: 754 },
-      end:   { x: width - MARGIN_X, y: 754 },
+      end: { x: width - MARGIN_X, y: 754 },
       thickness: 0.5,
-      color: rgb(0.85,0.85,0.85),
+      color: rgb(0.85, 0.85, 0.85),
     });
   }
 
@@ -165,7 +179,7 @@ export async function generatePdfBuffer({
       const MAX_LOGO_W = 180;
       const wLogo = Math.min(MAX_LOGO_W, LOGO_H * aspect);
       page.drawImage(img, { x: MARGIN_X, y: y - LOGO_H + 6, width: wLogo, height: LOGO_H });
-      y -= 44; // increased spacing between logo and title (was 32)
+      y -= 44; // spacing between logo and title
     }
   }
 
@@ -179,10 +193,12 @@ export async function generatePdfBuffer({
   const badgeCX = width - MARGIN_X - badgeR;
   const badgeCY = y + 4; // vertically aligns with title
   page.drawCircle({
-    x: badgeCX, y: badgeCY, size: badgeR,
+    x: badgeCX,
+    y: badgeCY,
+    size: badgeR,
     color: rgb(0.1, 0.45, 0.85),
-    borderColor: rgb(0,0,0),
-    borderWidth: 0.2
+    borderColor: rgb(0, 0, 0),
+    borderWidth: 0.2,
   });
   const tw = fontBold.widthOfTextAtSize(badgeText, 12);
   page.drawText(badgeText, {
@@ -209,19 +225,24 @@ export async function generatePdfBuffer({
   y -= 18;
 
   // header row
-  page.drawText("Symbol", { x: MARGIN_X, y, size: BODY_SIZE, font: fontBold, color: rgb(0.35,0.35,0.35) });
-  drawRightAlignedText(page, "Weight", width - MARGIN_X, y, BODY_SIZE, fontBold, rgb(0.35,0.35,0.35));
+  page.drawText("Symbol", {
+    x: MARGIN_X,
+    y,
+    size: BODY_SIZE,
+    font: fontBold,
+    color: rgb(0.35, 0.35, 0.35),
+  });
+  drawRightAlignedText(page, "Weight", width - MARGIN_X, y, BODY_SIZE, fontBold, rgb(0.35, 0.35, 0.35));
   y -= 16;
   page.drawLine({
     start: { x: MARGIN_X, y },
-    end:   { x: width - MARGIN_X, y },
+    end: { x: width - MARGIN_X, y },
     thickness: 0.5,
-    color: rgb(0.88,0.88,0.88),
+    color: rgb(0.88, 0.88, 0.88),
   });
   y -= 8;
 
   const ROW_H = 16;
-  let rowIndex = 0;
 
   if (!holdings || holdings.length === 0) {
     page.drawText("No holdings provided.", { x: MARGIN_X, y, size: BODY_SIZE, font });
@@ -230,22 +251,18 @@ export async function generatePdfBuffer({
     for (const h of holdings) {
       if (y < 60) newPage();
 
-      // zebra stripe
-      if (rowIndex % 2 === 0) {
-        page.drawRectangle({
-          x: MARGIN_X - 2,
-          y: y - 2,
-          width: width - MARGIN_X * 2 + 4,
-          height: ROW_H + 4,
-          color: rgb(0.965, 0.965, 0.97),
-        });
-      }
+      // (Option B) subtle row rule (no fill, no overlap)
+      page.drawLine({
+        start: { x: MARGIN_X, y: y - 2 },
+        end: { x: width - MARGIN_X, y: y - 2 },
+        thickness: 0.25,
+        color: rgb(0.92, 0.92, 0.94),
+      });
 
       page.drawText(String(h.symbol).toUpperCase(), { x: MARGIN_X, y, size: BODY_SIZE, font });
       const weightText = `${(Number(h.weight) || 0).toFixed(1)}%`;
       drawRightAlignedText(page, weightText, width - MARGIN_X, y, BODY_SIZE, font);
       y -= ROW_H;
-      rowIndex++;
     }
   }
 
@@ -264,13 +281,14 @@ export async function generatePdfBuffer({
   // Estimate box height
   let tempY = y;
   for (const r of recos.slice(0, 3)) {
-    const lines = wrapText(r, maxW - 12, font, BODY_SIZE);
+    const lines = wrapText(r, maxW - 24, font, BODY_SIZE);
     tempY -= lines.length * 16 + 4 + 2; // lines + bullet spacing
   }
   const boxHeight = Math.min(200, startY - tempY + 14);
   // background
   page.drawRectangle({
-    x: MARGIN_X, y: boxTop - boxHeight,
+    x: MARGIN_X,
+    y: boxTop - boxHeight,
     width: width - MARGIN_X * 2,
     height: boxHeight,
     color: rgb(0.98, 0.99, 1.0),
@@ -281,7 +299,11 @@ export async function generatePdfBuffer({
   // bullets in box
   y = boxTop - 18;
   for (const r of recos.slice(0, 3)) {
-    if (y < 80) { newPage(); page.drawText("Recommended Holdings", { x: MARGIN_X, y, size: SECTION_SIZE, font: fontBold }); y -= 18; }
+    if (y < 80) {
+      newPage();
+      page.drawText("Recommended Holdings", { x: MARGIN_X, y, size: SECTION_SIZE, font: fontBold });
+      y -= 18;
+    }
     page.drawText("•", { x: MARGIN_X + 12, y, size: BODY_SIZE, font });
     const lines = wrapText(r, maxW - 24, font, BODY_SIZE);
     let first = true;
@@ -301,13 +323,14 @@ export async function generatePdfBuffer({
   y -= 18;
 
   // simple green/red bars + labels
-  page.drawRectangle({ x: MARGIN_X,     y, width: 140, height: 6, color: rgb(0.10, 0.60, 0.25) });
-  page.drawText("Bull", { x: MARGIN_X + 148, y: y - 1, size: 10, font, color: rgb(0.10,0.60,0.25) });
-  page.drawRectangle({ x: MARGIN_X + 200, y, width: 140, height: 6, color: rgb(0.70, 0.20, 0.20) });
-  page.drawText("Bear", { x: MARGIN_X + 348, y: y - 1, size: 10, font, color: rgb(0.70,0.20,0.20) });
+  page.drawRectangle({ x: MARGIN_X, y, width: 140, height: 6, color: rgb(0.1, 0.6, 0.25) });
+  page.drawText("Bull", { x: MARGIN_X + 148, y: y - 1, size: 10, font, color: rgb(0.1, 0.6, 0.25) });
+  page.drawRectangle({ x: MARGIN_X + 200, y, width: 140, height: 6, color: rgb(0.7, 0.2, 0.2) });
+  page.drawText("Bear", { x: MARGIN_X + 348, y: y - 1, size: 10, font, color: rgb(0.7, 0.2, 0.2) });
   y -= 14;
 
-  const lead = "Use the market cycle lens to guide risk pacing while staying close to your strategic targets. Avoid large, all-or-nothing moves.";
+  const lead =
+    "Use the market cycle lens to guide risk pacing while staying close to your strategic targets. Avoid large, all-or-nothing moves.";
   const bullets = [
     "Bull phase: allow equity to ride within guardrails; harvest gains on excess drift.",
     "Bear phase: defend with quality, cash flow, and investment-grade bonds; rebalance into weakness incrementally.",
@@ -325,18 +348,4 @@ export async function generatePdfBuffer({
   for (const b of bullets) {
     if (y < 60) newPage();
     page.drawText("•", { x: MARGIN_X, y, size: BODY_SIZE, font });
-    const lines = wrapText(b, maxW - 12, font, BODY_SIZE);
-    let first = true;
-    for (const line of lines) {
-      if (!first && y < 60) newPage();
-      page.drawText(line, { x: MARGIN_X + 12, y, size: BODY_SIZE, font });
-      y -= 16;
-      first = false;
-    }
-    y -= 2;
-  }
-
-  // finalize last page
-  drawFooter();
-  return await pdf.save(); // Uint8Array
-}
+    const lines = wrapText(b, maxW - 12, font, BODY_SIZE);_
