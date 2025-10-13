@@ -7,7 +7,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 export default function AdminLoginClient() {
   const router = useRouter();
   const sp = useSearchParams();
-  const returnTo = sp.get("returnTo") || "/admin/orders";
+
+  // default to orders after login; allow ?returnTo=/admin/...
+  const rawReturnTo = sp.get("returnTo") || "/admin/orders";
+  const returnTo =
+    typeof rawReturnTo === "string" && rawReturnTo.startsWith("/")
+      ? rawReturnTo
+      : "/admin/orders"; // guard against open redirects
 
   const [token, setToken] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -18,15 +24,19 @@ export default function AdminLoginClient() {
     setErr(null);
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/session", {
+      const res = await fetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // send the token to the *login* route, not session
         body: JSON.stringify({ token }),
       });
+
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || "Unauthorized");
       }
+
+      // cookie set by server; now navigate
       router.replace(returnTo);
     } catch (e: any) {
       setErr(e?.message || "Login failed");
@@ -48,6 +58,7 @@ export default function AdminLoginClient() {
             onChange={(e) => setToken(e.target.value)}
             placeholder="Enter ADMIN_TOKEN"
             autoComplete="off"
+            type="password"
           />
         </div>
 
