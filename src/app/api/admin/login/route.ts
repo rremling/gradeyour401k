@@ -1,10 +1,9 @@
-// src/app/api/admin/login/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
   const { token } = await req.json().catch(() => ({}));
-  if (token !== process.env.ADMIN_TOKEN) {
+  if (!token || token !== process.env.ADMIN_TOKEN) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
