@@ -1,11 +1,10 @@
+// src/app/admin/login/page.tsx
 import { Suspense } from "react";
-import dynamic from "next/dynamic";
-
-const AdminLoginClient = dynamic(() => import("./AdminLoginClient"), { ssr: false });
+import AdminLoginClient from "./AdminLoginClient";
 
 export default function Page() {
   return (
-    <Suspense fallback={null}>
+    <Suspense>
       <AdminLoginClient />
     </Suspense>
   );
