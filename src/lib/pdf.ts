@@ -134,7 +134,6 @@ export async function generatePdfBuffer({
       color: rgb(0.35, 0.35, 0.35),
     });
     const label = `Page ${pageIndex}`;
-    const pw = font.widthOfTextAtSize(label, 10);
     page.drawText(label, { x: MARGIN_X, y: 30, size: 10, font, color: rgb(0.35,0.35,0.35) });
   }
 
@@ -166,7 +165,7 @@ export async function generatePdfBuffer({
       const MAX_LOGO_W = 180;
       const wLogo = Math.min(MAX_LOGO_W, LOGO_H * aspect);
       page.drawImage(img, { x: MARGIN_X, y: y - LOGO_H + 6, width: wLogo, height: LOGO_H });
-      y -= 32;
+      y -= 44; // increased spacing between logo and title (was 32)
     }
   }
 
@@ -253,8 +252,8 @@ export async function generatePdfBuffer({
   y -= 8;
   sectionRule();
 
-  // Recommended (prefilled)
-  page.drawText("Recommended", { x: MARGIN_X, y, size: SECTION_SIZE, font: fontBold });
+  // Recommended Holdings (prefilled)
+  page.drawText("Recommended Holdings", { x: MARGIN_X, y, size: SECTION_SIZE, font: fontBold });
   y -= 18;
 
   const recos = recommendedByProfile(profile);
@@ -262,7 +261,7 @@ export async function generatePdfBuffer({
   // callout box background
   const startY = y;
   const boxTop = startY + 10;
-  // Estimate box height = min(200, bullets * lineHeight), we’ll draw bullets then box border behind
+  // Estimate box height
   let tempY = y;
   for (const r of recos.slice(0, 3)) {
     const lines = wrapText(r, maxW - 12, font, BODY_SIZE);
@@ -282,7 +281,7 @@ export async function generatePdfBuffer({
   // bullets in box
   y = boxTop - 18;
   for (const r of recos.slice(0, 3)) {
-    if (y < 80) { newPage(); page.drawText("Recommended", { x: MARGIN_X, y, size: SECTION_SIZE, font: fontBold }); y -= 18; }
+    if (y < 80) { newPage(); page.drawText("Recommended Holdings", { x: MARGIN_X, y, size: SECTION_SIZE, font: fontBold }); y -= 18; }
     page.drawText("•", { x: MARGIN_X + 12, y, size: BODY_SIZE, font });
     const lines = wrapText(r, maxW - 24, font, BODY_SIZE);
     let first = true;
