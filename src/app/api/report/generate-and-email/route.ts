@@ -262,8 +262,7 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
     </table>
 
     <h2 style="margin:0 0 8px 0;">Your GradeYour401k Report</h2>
-    <p style="margin:0 0 16px 0;">Hi,</p>
-    <p style="margin:0 0 16px 0;">Your personalized 401(k) report is attached as a PDF.</p>
+      <p style="margin:0 0 16px 0;">Your personalized 401(k) report is attached as a PDF.</p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px 0;">
       <tr>
