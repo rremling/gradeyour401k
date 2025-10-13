@@ -1,3 +1,4 @@
+// src/app/admin/orders/page.tsx
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import OrdersClient from "./OrdersClient";
@@ -15,9 +16,10 @@ export default async function Page() {
 
   let initialOrders: any[] = [];
   let initialError: string | null = null;
+  let nextCursor: string | null = null;
 
   try {
-    const res = await fetch(`${base}/api/admin/orders`, {
+    const res = await fetch(`${base}/api/admin/orders?limit=25`, {
       headers: { cookie: cookies().toString() },
       cache: "no-store",
     });
@@ -31,6 +33,7 @@ export default async function Page() {
     } else {
       const j = await res.json().catch(() => ({} as any));
       initialOrders = Array.isArray(j?.orders) ? j.orders : [];
+      nextCursor = j?.nextCursor ?? null;
       if (j?._error) initialError = String(j._error);
     }
   } catch (e: any) {
@@ -38,5 +41,5 @@ export default async function Page() {
     console.error("orders/page.tsx: fetch failed:", e);
   }
 
-  return <OrdersClient initialOrders={initialOrders} initialError={initialError} />;
+  return <OrdersClient initialOrders={initialOrders} initialError={initialError} initialCursor={nextCursor} />;
 }
