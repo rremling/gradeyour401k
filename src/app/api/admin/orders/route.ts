@@ -1,4 +1,3 @@
-// src/app/api/admin/orders/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { neon, neonConfig } from "@neondatabase/serverless";
@@ -7,6 +6,14 @@ neonConfig.fetchConnectionCache = true;
 export const dynamic = "force-dynamic";
 
 const json = (d: any, init?: number | ResponseInit) => NextResponse.json(d, init);
+
+function toIsoOrNull(v: string | null): string | null {
+  if (!v) return null;
+  const ms = Date.parse(v);
+  if (!Number.isFinite(ms)) return null;
+  // normalize to ISO; Postgres can compare timestamptz with this fine
+  return new Date(ms).toISOString();
+}
 
 export async function GET(req: Request) {
   try {
@@ -20,43 +27,55 @@ export async function GET(req: Request) {
     if (!url) return json({ orders: [], _error: "Missing DATABASE_URL" }, { status: 200 });
     const sql = neon(url);
 
-    // --- Pagination ---
+    // --- Params ---
     const { searchParams } = new URL(req.url);
-    const limit = Math.min(Number(searchParams.get("limit")) || 20, 100);
-    const after = searchParams.get("after"); // ISO timestamp string (exclusive)
+    const limitRaw = Number(searchParams.get("limit"));
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20;
 
-    // Build WHERE if a cursor is provided
-    const where =
-      after ? sql/*sql*/`WHERE created_at < ${after}` : sql``;
+    const afterRaw = searchParams.get("after");
+    const after = toIsoOrNull(afterRaw); // <-- VALIDATE STRICTLY
 
-    // Query exactly the columns you have
-    const rows = await sql<any[]>/*sql*/`
-      SELECT id, email, status, created_at, amount, currency
-      FROM public.orders
-      ${where}
-      ORDER BY created_at DESC
-      LIMIT ${limit + 1}
-    `;
+    // --- Query (no dynamic fragments) ---
+    // We select id first so ORDER BY 1 is always valid.
+    let rows: any[];
+    if (after) {
+      rows = await sql/*sql*/`
+        SELECT id, email, status, created_at, amount, currency
+        FROM public.orders
+        WHERE created_at < ${after}
+        ORDER BY 1 DESC, created_at DESC
+        LIMIT ${limit + 1}
+      `;
+    } else {
+      rows = await sql/*sql*/`
+        SELECT id, email, status, created_at, amount, currency
+        FROM public.orders
+        ORDER BY 1 DESC, created_at DESC
+        LIMIT ${limit + 1}
+      `;
+    }
 
     const slice = rows.slice(0, limit);
 
-    // amount is integer cents -> convert to dollars
     const orders = slice.map(r => ({
       id: r.id,
       customerEmail: r.email,
       status: r.status,
       createdAt: r.created_at,
-      total: typeof r.amount === "number" ? r.amount / 100 : null,
+      // amount is integer cents; divide to dollars. If yours is dollars already, remove "/ 100".
+      total: typeof r.amount === "number" ? r.amount / 100 : (r.amount != null ? Number(r.amount) / 100 : null),
       currency: r.currency ?? "usd",
     }));
 
-    const nextCursor =
-      rows.length > limit ? String(slice[slice.length - 1]?.created_at) : null;
+    const nextCursor = rows.length > limit ? String(slice[slice.length - 1]?.created_at) : null;
 
     return json({ orders, nextCursor });
   } catch (err: any) {
+    // Keep UI alive; surface detail for debugging
     console.error("GET /api/admin/orders error:", err);
-    // Keep the UI alive; surface hint in _error
-    return json({ orders: [], _error: err?.code || err?.message || "DB error" }, { status: 200 });
+    return json(
+      { orders: [], _error: err?.code || err?.message || "DB error" },
+      { status: 200 }
+    );
   }
 }
