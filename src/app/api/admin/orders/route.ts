@@ -1,9 +1,8 @@
 // src/app/api/admin/orders/route.ts
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { neon, neonConfig } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 
-neonConfig.fetchConnectionCache = true;
 export const dynamic = "force-dynamic";
 
 function toIsoOrNull(v: string | null): string | null {
@@ -29,33 +28,54 @@ export async function GET(req: Request) {
     // --- Params ---
     const { searchParams } = new URL(req.url);
     const limitRaw = Number(searchParams.get("limit"));
-    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 50;
+    const limitVal = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 50;
+    // inline the validated integer to avoid LIMIT $1 parse issues
+    const limitUnsafe = sql.unsafe(String(limitVal + 1));
+
     const after = toIsoOrNull(searchParams.get("after"));
 
-    // --- Single query with optional WHERE ---
-    const where = after ? sql/*sql*/`WHERE created_at < ${after}` : sql``;
+    // --- Query (two explicit branches; same column list in both) ---
+    let rows: any[];
+    if (after) {
+      rows = await sql/*sql*/`
+        SELECT
+          id,
+          email,
+          status,
+          created_at,
+          amount::bigint AS amount_cents,
+          currency,
+          plan_key,
+          next_due_1,
+          next_due_2,
+          next_due_3
+        FROM public.orders
+        WHERE created_at < ${after}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${limitUnsafe}
+      `;
+    } else {
+      rows = await sql/*sql*/`
+        SELECT
+          id,
+          email,
+          status,
+          created_at,
+          amount::bigint AS amount_cents,
+          currency,
+          plan_key,
+          next_due_1,
+          next_due_2,
+          next_due_3
+        FROM public.orders
+        ORDER BY created_at DESC, id DESC
+        LIMIT ${limitUnsafe}
+      `;
+    }
 
-    const rows = await sql<any[]>/*sql*/`
-      SELECT
-        id,
-        email,
-        status,
-        created_at,
-        amount::bigint AS amount_cents,
-        currency,
-        plan_key,
-        next_due_1,
-        next_due_2,
-        next_due_3
-      FROM public.orders
-      ${where}
-      ORDER BY created_at DESC, id DESC
-      LIMIT ${limit + 1}
-    `;
+    const slice = rows.slice(0, limitVal);
 
-    const slice = rows.slice(0, limit);
-
-    const orders = slice.map((r) => {
+    const orders = slice.map((r: any) => {
       const cents =
         r.amount_cents === null || r.amount_cents === undefined
           ? null
@@ -75,12 +95,12 @@ export async function GET(req: Request) {
     });
 
     const nextCursor =
-      rows.length > limit ? String(slice[slice.length - 1]?.created_at) : null;
+      rows.length > limitVal ? String(slice[slice.length - 1]?.created_at) : null;
 
     return NextResponse.json({ orders, nextCursor });
   } catch (err: any) {
     console.error("GET /api/admin/orders error:", err);
-    // Keep UI alive: return 200 with hint instead of crashing
+    // Keep UI alive
     return NextResponse.json(
       { orders: [], _error: err?.code || err?.message || "DB error" },
       { status: 200 }
