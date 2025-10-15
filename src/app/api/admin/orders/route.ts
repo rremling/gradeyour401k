@@ -29,12 +29,10 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const limitRaw = Number(searchParams.get("limit"));
     const limitVal = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 50;
-    // inline the validated integer to avoid LIMIT $1 parse issues
-    const limitUnsafe = sql.unsafe(String(limitVal + 1));
-
+    const limitPlusOne = limitVal + 1; // parameterized below
     const after = toIsoOrNull(searchParams.get("after"));
 
-    // --- Query (two explicit branches; same column list in both) ---
+    // --- Query (two explicit branches; identical columns) ---
     let rows: any[];
     if (after) {
       rows = await sql/*sql*/`
@@ -52,7 +50,7 @@ export async function GET(req: Request) {
         FROM public.orders
         WHERE created_at < ${after}
         ORDER BY created_at DESC, id DESC
-        LIMIT ${limitUnsafe}
+        LIMIT ${limitPlusOne}
       `;
     } else {
       rows = await sql/*sql*/`
@@ -69,17 +67,14 @@ export async function GET(req: Request) {
           next_due_3
         FROM public.orders
         ORDER BY created_at DESC, id DESC
-        LIMIT ${limitUnsafe}
+        LIMIT ${limitPlusOne}
       `;
     }
 
     const slice = rows.slice(0, limitVal);
 
     const orders = slice.map((r: any) => {
-      const cents =
-        r.amount_cents === null || r.amount_cents === undefined
-          ? null
-          : Number(r.amount_cents);
+      const cents = r.amount_cents == null ? null : Number(r.amount_cents);
       return {
         id: r.id,
         customerEmail: r.email,
