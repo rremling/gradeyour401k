@@ -30,36 +30,32 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const limitRaw = Number(searchParams.get("limit"));
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 50;
-
     const after = toIsoOrNull(searchParams.get("after"));
 
-    // --- Query (your schema: public.orders) ---
-    // Order by created_at DESC, then id DESC for stability.
-    let rows: any[];
-    if (after) {
-      rows = await sql/*sql*/`
-        SELECT id, email, status, created_at,
-               amount::bigint AS amount_cents,
-               currency
-        FROM public.orders
-        WHERE created_at < ${after}
-        ORDER BY created_at DESC, id DESC
-        LIMIT ${limit + 1}
-      `;
-    } else {
-      rows = await sql/*sql*/`
-        SELECT id, email, status, created_at,
-               amount::bigint AS amount_cents,
-               currency
-        FROM public.orders
-        ORDER BY created_at DESC, id DESC
-        LIMIT ${limit + 1}
-      `;
-    }
+    // --- Single query with optional WHERE ---
+    const where = after ? sql/*sql*/`WHERE created_at < ${after}` : sql``;
+
+    const rows = await sql<any[]>/*sql*/`
+      SELECT
+        id,
+        email,
+        status,
+        created_at,
+        amount::bigint AS amount_cents,
+        currency,
+        plan_key,
+        next_due_1,
+        next_due_2,
+        next_due_3
+      FROM public.orders
+      ${where}
+      ORDER BY created_at DESC, id DESC
+      LIMIT ${limit + 1}
+    `;
 
     const slice = rows.slice(0, limit);
 
-    const orders = slice.map((r: any) => {
+    const orders = slice.map((r) => {
       const cents =
         r.amount_cents === null || r.amount_cents === undefined
           ? null
@@ -71,6 +67,10 @@ export async function GET(req: Request) {
         createdAt: r.created_at,
         total: Number.isFinite(cents) ? cents / 100 : null, // dollars
         currency: r.currency ?? "usd",
+        planKey: r.plan_key ?? null,
+        nextDue1: r.next_due_1 ?? null,
+        nextDue2: r.next_due_2 ?? null,
+        nextDue3: r.next_due_3 ?? null,
       };
     });
 
