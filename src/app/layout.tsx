@@ -1,6 +1,7 @@
 // src/app/layout.tsx
 import "./globals.css";
 import Nav from "./components/Nav";
+import { Analytics } from "@vercel/analytics/react"; // ✅ add this
 
 export const metadata = {
   title: "GradeYour401k",
@@ -17,6 +18,7 @@ export default function RootLayout({
       <body className="min-h-screen flex flex-col bg-gray-50 text-gray-900">
         <Nav />
         <main className="flex-1">{children}</main>
+        <Analytics /> {/* ✅ send page views & events to Vercel */}
       </body>
     </html>
   );
