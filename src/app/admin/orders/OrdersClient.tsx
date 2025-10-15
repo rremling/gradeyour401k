@@ -10,7 +10,6 @@ type Order = {
   createdAt?: string | null;     // or: created_at
   total?: number | string | null;
   currency?: string | null;
-  // either camelCase or snake_case may appear from the API:
   planKey?: string | null;       // or: plan_key
   nextDue1?: string | null;      // or: next_due_1
   nextDue2?: string | null;      // or: next_due_2
@@ -18,7 +17,7 @@ type Order = {
   [k: string]: any;
 };
 
-// tiny helpers to read either camelCase or snake_case
+// read camelCase or snake_case safely
 const pick = <T,>(o: any, camel: string, snake: string): T | null =>
   (o?.[camel] ?? o?.[snake] ?? null) as T | null;
 
@@ -61,19 +60,73 @@ export default function OrdersClient({
   initialError?: string | null;
   initialCursor?: string | null;
 }) {
-  const [orders, setOrders] = useState<Order[]>(
-    Array.isArray(initialOrders) ? initialOrders : []
-  );
+  const [orders, setOrders] = useState<Order[]>(Array.isArray(initialOrders) ? initialOrders : []);
   const [err, setErr] = useState<string | null>(initialError ?? null);
   const [loading, setLoading] = useState(false);
-  const [cursor, setCursor] = useState<string | null>(initialCursor ?? null);
   const [moreLoading, setMoreLoading] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(initialCursor ?? null);
+
+  // NEW: search state (persist current query to use for loadMore/refresh)
+  const [query, setQuery] = useState<string>("");
+  const [activeEmail, setActiveEmail] = useState<string>(""); // last applied email
+
+  function buildQuery(base: string, opts?: { after?: string | null; email?: string | null; limit?: number }) {
+    const url = new URL(base, window.location.origin);
+    url.pathname = "/api/admin/orders";
+    const limit = opts?.limit ?? 25;
+    url.searchParams.set("limit", String(limit));
+    if (opts?.after) url.searchParams.set("after", opts.after);
+    const e = (opts?.email ?? "").trim();
+    if (e) url.searchParams.set("email", e);
+    return url.pathname + url.search; // relative path for fetch
+    }
+
+  async function applySearch() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const email = query.trim();
+      const url = buildQuery("/api/admin/orders", { email, limit: 25 });
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error(`Search failed (${r.status})`);
+      const j = await r.json().catch(() => ({} as any));
+      setOrders(Array.isArray(j?.orders) ? j.orders : []);
+      setCursor(j?.nextCursor ?? null);
+      setActiveEmail(email); // remember current filter for loadMore/refresh
+      if (j?._error) setErr(String(j._error));
+    } catch (e: any) {
+      setErr(e?.message || "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function clearSearch() {
+    setQuery("");
+    setActiveEmail("");
+    setLoading(true);
+    setErr(null);
+    try {
+      const url = buildQuery("/api/admin/orders", { limit: 25 });
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error(`Refresh failed (${r.status})`);
+      const j = await r.json().catch(() => ({} as any));
+      setOrders(Array.isArray(j?.orders) ? j.orders : []);
+      setCursor(j?.nextCursor ?? null);
+      if (j?._error) setErr(String(j._error));
+    } catch (e: any) {
+      setErr(e?.message || "Refresh failed");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function refresh() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await fetch("/api/admin/orders?limit=25", { cache: "no-store" });
+      const url = buildQuery("/api/admin/orders", { email: activeEmail, limit: 25 });
+      const r = await fetch(url, { cache: "no-store" });
       if (!r.ok) throw new Error(`Refresh failed (${r.status})`);
       const j = await r.json().catch(() => ({} as any));
       setOrders(Array.isArray(j?.orders) ? j.orders : []);
@@ -91,12 +144,12 @@ export default function OrdersClient({
     setMoreLoading(true);
     setErr(null);
     try {
-      const url = `/api/admin/orders?limit=25&after=${encodeURIComponent(cursor)}`;
+      const url = buildQuery("/api/admin/orders", { after: cursor, email: activeEmail, limit: 25 });
       const r = await fetch(url, { cache: "no-store" });
       if (!r.ok) throw new Error(`Load more failed (${r.status})`);
       const j = await r.json().catch(() => ({} as any));
       const next = Array.isArray(j?.orders) ? j.orders : [];
-      setOrders((prev) => [...prev, ...next]);
+      setOrders(prev => [...prev, ...next]);
       setCursor(j?.nextCursor ?? null);
       if (j?._error) setErr(String(j._error));
     } catch (e: any) {
@@ -111,33 +164,74 @@ export default function OrdersClient({
     window.location.href = "/admin/login?returnTo=/admin/orders";
   }
 
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      applySearch();
+    }
+  }
+
   return (
     <main className="p-6">
-      <div className="flex items-center justify-between mb-4">
+      {/* Header + Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <h1 className="text-xl font-semibold">Orders</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="rounded-md bg-blue-600 text-white px-4 py-2 disabled:opacity-50"
-          >
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-          <button
-            onClick={logout}
-            className="rounded-md bg-gray-200 text-gray-900 px-4 py-2 hover:bg-gray-300"
-          >
-            Logout
-          </button>
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          {/* Search box */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Search by email (e.g. user@domain.com)"
+              className="border rounded-md px-3 py-2 w-64"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
+            />
+            <button
+              onClick={applySearch}
+              disabled={loading}
+              className="rounded-md bg-blue-600 text-white px-4 py-2 disabled:opacity-50"
+              title="Search"
+            >
+              Search
+            </button>
+            <button
+              onClick={clearSearch}
+              disabled={loading && !activeEmail && !query}
+              className="rounded-md bg-gray-100 px-3 py-2 hover:bg-gray-200 disabled:opacity-50"
+              title="Clear"
+            >
+              Clear
+            </button>
+          </div>
+
+          {/* Existing actions */}
+          <div className="flex gap-2">
+            <button
+              onClick={refresh}
+              disabled={loading}
+              className="rounded-md bg-blue-600 text-white px-4 py-2 disabled:opacity-50"
+            >
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              onClick={logout}
+              className="rounded-md bg-gray-200 text-gray-900 px-4 py-2 hover:bg-gray-300"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* Error banner */}
       {err && (
         <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
           {err}
         </div>
       )}
 
+      {/* List */}
       {orders.length === 0 ? (
         <div className="mt-6 text-sm text-gray-600">No orders found.</div>
       ) : (
@@ -153,11 +247,8 @@ export default function OrdersClient({
                   <div className="text-sm opacity-80">
                     {email ?? "—"} • {o.status ?? "—"} • {formatDate(created)}
                   </div>
-                  <div className="text-sm">
-                    Total: {formatMoney(o.total, currency)}
-                  </div>
+                  <div className="text-sm">Total: {formatMoney(o.total, currency)}</div>
 
-                  {/* Plan / Next dues */}
                   <div className="mt-2 text-sm grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
                     <div>
                       <span className="opacity-70">Plan:</span>{" "}
