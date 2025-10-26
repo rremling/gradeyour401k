@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
+// Ensure Node runtime for 'pg'
 export const runtime = "nodejs";
 
 // --- ENV ---
@@ -13,7 +14,6 @@ const DATABASE_URL = process.env.DATABASE_URL || "";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const ORDER_EMAIL_TO = process.env.ORDER_EMAIL_TO || "";
 const ORDER_EMAIL_FROM = process.env.ORDER_EMAIL_FROM || "";
-const NEXT_PUBLIC_BASE_URL = (process.env.NEXT_PUBLIC_BASE_URL || "").replace(/\/+$/, "");
 
 if (!STRIPE_SECRET_KEY) console.warn("[webhook] Missing STRIPE_SECRET_KEY");
 if (!STRIPE_WEBHOOK_SECRET) console.warn("[webhook] Missing STRIPE_WEBHOOK_SECRET");
@@ -22,73 +22,55 @@ if (!RESEND_API_KEY) console.warn("[webhook] Missing RESEND_API_KEY");
 if (!ORDER_EMAIL_TO) console.warn("[webhook] Missing ORDER_EMAIL_TO");
 if (!ORDER_EMAIL_FROM) console.warn("[webhook] Missing ORDER_EMAIL_FROM");
 
-// --- Clients ---
+// --- Stripe client ---
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
-const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
-// --- Utils ---
-function getBaseUrl(req: Request) {
-  if (NEXT_PUBLIC_BASE_URL) return NEXT_PUBLIC_BASE_URL;
-  const host = process.env.VERCEL_URL;
-  return host ? `https://${host.replace(/\/+$/, "")}` : "http://localhost:3000";
-}
+// --- Postgres pool (Neon) ---
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-// Create table (idempotent) and UPSERT order row
-async function upsertOrder(params: {
+// Save order helper (columns must match your table)
+async function saveOrder(params: {
   email: string | null;
   plan_key: string | null;
   preview_id: string | null;
   stripe_session_id: string;
-  amount_total: number | null;
-  payment_status: string | null;
+  status: string;
 }) {
-  const { email, plan_key, preview_id, stripe_session_id, amount_total, payment_status } = params;
-
-  // Ensure table exists and has the columns we use
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.orders (
-      id BIGSERIAL PRIMARY KEY,
-      stripe_session_id TEXT UNIQUE NOT NULL,
-      email TEXT,
-      plan_key TEXT,
-      preview_id TEXT,
-      amount_total BIGINT,
-      payment_status TEXT,
-      created_at TIMESTAMPTZ DEFAULT now()
-    );
-  `);
+  const { email, plan_key, preview_id, stripe_session_id, status } = params;
 
   const sql = `
     INSERT INTO public.orders
-      (stripe_session_id, email, plan_key, preview_id, amount_total, payment_status)
+      (email, plan_key, status, preview_id, stripe_session_id, created_at, next_due_1)
     VALUES
-      ($1, $2, $3, $4, $5, $6)
-    ON CONFLICT (stripe_session_id) DO UPDATE
-      SET email = EXCLUDED.email,
-          plan_key = EXCLUDED.plan_key,
-          preview_id = EXCLUDED.preview_id,
-          amount_total = EXCLUDED.amount_total,
-          payment_status = EXCLUDED.payment_status
+      ($1, $2, $3, $4, $5, NOW(), NULL)
+    ON CONFLICT (stripe_session_id) DO NOTHING
     RETURNING id
   `;
-  const values = [
-    stripe_session_id,
-    email,
-    plan_key,
-    preview_id,
-    amount_total,
-    payment_status,
-  ];
+  const values = [email, plan_key, status, preview_id, stripe_session_id];
   const res = await pool.query(sql, values);
   return res.rows?.[0]?.id ?? null;
 }
 
-// Admin email via Resend
-async function sendAdminEmail(opts: { subject: string; text: string; html?: string }) {
-  if (!RESEND_API_KEY || !ORDER_EMAIL_TO || !ORDER_EMAIL_FROM) {
-    console.warn("[webhook] Admin email not sent (missing config)");
+// Email helper (Resend)
+async function sendOrderEmail(opts: {
+  to: string;
+  from: string;
+  subject: string;
+  text: string;
+  html?: string;
+}) {
+  if (!RESEND_API_KEY || !opts.to || !opts.from) {
+    console.warn("[webhook] Email not sent (missing config)", {
+      hasKey: !!RESEND_API_KEY,
+      to: opts.to,
+      from: opts.from,
+    });
     return;
   }
+
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -97,21 +79,22 @@ async function sendAdminEmail(opts: { subject: string; text: string; html?: stri
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from: ORDER_EMAIL_FROM,
-        to: ORDER_EMAIL_TO,
+        from: opts.from,
+        to: opts.to,
         subject: opts.subject,
         text: opts.text,
-        html: opts.html ?? opts.text.replace(/\n/g, "<br>"),
+        html: opts.html ?? undefined,
       }),
     });
+
     if (!res.ok) {
       const body = await res.text().catch(() => "(no body)");
       console.error("[webhook] Resend API error", res.status, body);
     } else {
-      console.log("[webhook] admin email sent");
+      console.log("[webhook] order email sent");
     }
   } catch (err) {
-    console.error("[webhook] Admin email send failed:", err);
+    console.error("[webhook] Email send failed:", err);
   }
 }
 
@@ -128,28 +111,32 @@ export async function POST(req: NextRequest) {
 
   let event: Stripe.Event;
 
-  // 1) Verify signature with RAW body
+  // Stripe requires the raw body for signature verification
   try {
+    const body = await req.text();
     const sig = req.headers.get("stripe-signature");
     if (!sig) return new Response("Missing stripe-signature", { status: 400 });
-    const raw = await req.text();
-    event = stripe.webhooks.constructEvent(raw, sig, STRIPE_WEBHOOK_SECRET);
+
+    event = stripe.webhooks.constructEvent(body, sig, STRIPE_WEBHOOK_SECRET);
   } catch (err: any) {
     console.error("[webhook] constructEvent error:", err?.message || err);
-    return new Response(`Webhook Error: ${err?.message ?? "invalid payload"}`, { status: 400 });
+    return new Response(`Webhook Error: ${err?.message ?? "invalid payload"}`, {
+      status: 400,
+    });
   }
 
   try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
-      const paid = session.payment_status === "paid" || (session.amount_total ?? 0) === 0;
-      if (!paid) {
-        console.log("[webhook] session not paid/zero, skipping save", session.id);
-        return Response.json({ received: true });
-      }
+      // Email resolution (prefer customer_details)
+      const email =
+        session.customer_details?.email ||
+        (typeof session.customer === "string" ? null : session.customer?.email) ||
+        (session.customer_email as string | null) ||
+        null;
 
-      // Pull metadata (your /api/checkout sets plan_key + optional preview_id)
+      // --- Tolerant metadata reads (snake_case OR camelCase) ---
       const plan_key =
         (session.metadata?.plan_key as string | undefined) ??
         (session.metadata?.planKey as string | undefined) ??
@@ -160,71 +147,99 @@ export async function POST(req: NextRequest) {
         (session.metadata?.previewId as string | undefined) ??
         null;
 
-      const email =
-        session.customer_details?.email ||
-        (session.customer_email as string | null) ||
-        null;
-
-      const amount_total = typeof session.amount_total === "number" ? session.amount_total : null;
-      const payment_status = session.payment_status ?? null;
       const stripe_session_id = session.id;
+      const status =
+        (session.payment_status as string) ||
+        (session.status as string) ||
+        "paid";
 
-      // 2) UPSERT the order in Neon
+      // Save to DB (log but don't 500 on failure so Stripe won’t retry forever)
       try {
-        const orderId = await upsertOrder({
+        const orderId = await saveOrder({
           email,
           plan_key,
           preview_id,
           stripe_session_id,
-          amount_total,
-          payment_status,
+          status,
         });
-        console.log("[webhook] upserted order id:", orderId, {
-          email,
-          plan_key,
-          preview_id,
-          stripe_session_id,
-          amount_total,
-          payment_status,
-        });
+        console.log(
+          "[webhook] saved order:",
+          orderId ?? "(duplicate/ON CONFLICT)",
+          { email, plan_key, preview_id, stripe_session_id, status }
+        );
       } catch (e) {
-        console.error("[webhook] upsertOrder failed:", e);
+        console.error("[webhook] saveOrder failed:", e);
       }
 
-      // 3) (Optional) trigger your report email for non-review plans
-      if (plan_key && plan_key !== "review") {
-        try {
-          const base = getBaseUrl(req);
-          const r = await fetch(`${base}/api/report/generate-and-email`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ sessionId: session.id }),
-          });
-          if (!r.ok) {
-            const txt = await r.text().catch(() => "");
-            throw new Error(`report route ${r.status}: ${txt || r.statusText}`);
-          }
-        } catch (e: any) {
-          // Log, but still ACK so Stripe retries the webhook on its own schedule
-          console.error("[webhook] report email trigger failed:", e?.message || e);
-        }
+      // --- Gather more context (line items) ---
+      let lineItems: Stripe.ApiList<Stripe.LineItem> | null = null;
+      try {
+        lineItems = await stripe.checkout.sessions.listLineItems(session.id, { limit: 10 });
+      } catch (e) {
+        console.warn("[webhook] listLineItems failed:", e);
       }
 
-      // 4) Send you a quick admin email (fire-and-forget)
+      // Amount/currency helpers
+      const amt =
+        typeof session.amount_total === "number"
+          ? (session.amount_total / 100).toFixed(2)
+          : "—";
       const cur = (session.currency || "").toUpperCase();
-      const amt = amount_total !== null ? (amount_total / 100).toFixed(2) : "—";
-      const subject = `New order: ${plan_key ?? "unknown"} · ${amt} ${cur} · ${email ?? "no-email"}`;
-      const text = `New Stripe order
-Plan: ${plan_key ?? "(none)"}
-Preview: ${preview_id ?? "(none)"}
-Email: ${email ?? "(none)"}
+
+      // Build a concise, human-readable outline
+      const createdIso = session.created
+        ? new Date(session.created * 1000).toISOString()
+        : new Date().toISOString();
+
+      const liText =
+        lineItems?.data?.length
+          ? lineItems.data
+              .map((li) => {
+                const unit = (li.price?.unit_amount ?? 0) / 100;
+                const lc = (li.price?.currency || cur || "").toUpperCase();
+                return `• ${li.description || li.price?.nickname || li.price?.id || "Item"} × ${li.quantity ?? 1} @ ${unit.toFixed(2)} ${lc}`;
+              })
+              .join("\n")
+          : "• (No line items retrieved)";
+
+      const subject = `New order: ${plan_key ?? "unknown plan"} · ${amt} ${cur} · ${email ?? "no-email"}`;
+
+      const textBody = `New Stripe order received
+
+Time: ${createdIso}
+Status: ${status}
+
+Customer Email: ${email ?? "(none)"}
+Plan Key: ${plan_key ?? "(none)"}
+Preview ID: ${preview_id ?? "(none)"}
+Session ID: ${stripe_session_id}
+
 Amount: ${amt} ${cur}
-Session: ${stripe_session_id}
-Status: ${payment_status ?? "(none)"}`
-      sendAdminEmail({ subject, text }).catch(() => {});
+
+Line Items:
+${liText}
+
+Payment Intent: ${
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : session.payment_intent?.id ?? "(none)"
+      }
+Mode: ${session.mode ?? "(none)"}
+`;
+
+      // Fire-and-forget (don't block Stripe ack if email fails)
+      sendOrderEmail({
+        to: ORDER_EMAIL_TO,
+        from: ORDER_EMAIL_FROM,
+        subject,
+        text: textBody,
+        html: textBody.replace(/\n/g, "<br>"),
+      }).catch(() => {
+        /* logged inside helper */
+      });
     }
 
-    // Always ack so Stripe stops pushing this event (retries happen only on 4xx/5xx)
+    // Always acknowledge receipt to Stripe
     return Response.json({ received: true });
   } catch (err: any) {
     console.error("[webhook] handler error:", err?.message || err, {
