@@ -7,6 +7,7 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Finds a customer by email in your orders table; adapt if you store differently
