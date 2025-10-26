@@ -3,8 +3,30 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyAccountToken } from "@/lib/auth";
 import { query } from "@/lib/db";
+import Stripe from "stripe";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/* ───────────────────── Config / Options ───────────────────── */
+
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" }) : null;
+
+// Tweak these lists as you like
+const PROVIDERS = [
+  "Fidelity",
+  "Vanguard",
+  "Schwab",
+  "T. Rowe Price",
+  "Empower",
+  "Principal",
+  "John Hancock",
+  "ADP",
+  "Other",
+];
+
+const PROFILES = ["Conservative", "Moderate", "Growth", "Aggressive"];
 
 /* ───────────────────── Server Actions ───────────────────── */
 
@@ -49,18 +71,39 @@ async function updatePrefs(_: any, formData: FormData) {
 
 async function createPortal() {
   "use server";
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "";
-  const res = await fetch(`${base}/api/portal`, {
-    method: "POST",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json" },
-  });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j?.url) {
-    return { ok: false, error: j?.error || "Could not create portal session" };
+  if (!stripe) {
+    return { ok: false, error: "Stripe not configured" };
   }
-  // Redirect server-side to Stripe Billing Portal
-  redirect(j.url as string);
+
+  const token = cookies().get("acct")?.value || "";
+  const claims = await verifyAccountToken(token);
+  if (!claims) return { ok: false, error: "Unauthorized" };
+
+  // Lookup Stripe customer id for this email
+  const r: any = await query(
+    `SELECT stripe_customer_id
+       FROM public.orders
+      WHERE email = $1
+        AND plan_key = 'annual'
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [claims.email]
+  );
+  const rows = Array.isArray(r?.rows) ? r.rows : (Array.isArray(r) ? r : []);
+  const customerId: string | undefined = rows[0]?.stripe_customer_id;
+
+  if (!customerId) {
+    return { ok: false, error: "No Stripe customer found for this account." };
+  }
+
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+  const session = await stripe.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: `${base}/account`,
+  });
+
+  // Server-side redirect to Stripe portal
+  redirect(session.url);
 }
 
 async function logoutAction() {
@@ -79,7 +122,7 @@ async function getContext() {
 
   const email = claims.email;
 
-  // Use orders + previews to list downloadable PDFs (no separate reports table required)
+  // Use orders + previews to list downloadable PDFs
   const rReports: any = await query(
     `SELECT
         o.id          AS order_id,
@@ -207,22 +250,40 @@ export default async function AccountPage() {
         <form action={updatePrefs} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Provider</label>
-            <input
+            <select
               name="provider"
-              defaultValue={provider}
-              className="w-full border rounded-lg px-3 py-2"
-              placeholder="Fidelity / Vanguard / etc."
-            />
+              defaultValue={provider || ""}
+              className="w-full border rounded-lg px-3 py-2 bg-white"
+            >
+              <option value="" disabled>
+                Select a provider
+              </option>
+              {PROVIDERS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
           </div>
+
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Profile</label>
-            <input
+            <select
               name="profile"
-              defaultValue={profile}
-              className="w-full border rounded-lg px-3 py-2"
-              placeholder="Conservative / Moderate / Growth"
-            />
+              defaultValue={profile || ""}
+              className="w-full border rounded-lg px-3 py-2 bg-white"
+            >
+              <option value="" disabled>
+                Select a profile
+              </option>
+              {PROFILES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
           </div>
+
           <div className="sm:col-span-1">
             <button
               type="submit"
