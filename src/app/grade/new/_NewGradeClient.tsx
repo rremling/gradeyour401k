@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
+type InvestorProfile = "Growth" | "Balanced" | "Conservative";
 type Holding = { symbol: string; weight: number | "" }; // <-- allow empty while editing
 
 const LS_KEY = "gy4k_form_v1";
@@ -17,7 +17,6 @@ function parseRowsParam(raw: string | null): Holding[] | null {
         .filter((r) => r && typeof r.symbol === "string")
         .map((r) => ({
           symbol: String(r.symbol).toUpperCase(),
-          // accept "", number-like, or default to ""
           weight:
             r.weight === "" || r.weight === null || r.weight === undefined
               ? ""
@@ -46,7 +45,7 @@ export default function NewGradeClient() {
     const qpRows = parseRowsParam(q.get("rows"));
 
     if (qpProvider) setProvider(qpProvider);
-    if (qpProfile === "Aggressive Growth" || qpProfile === "Growth" || qpProfile === "Balanced") {
+    if (qpProfile === "Growth" || qpProfile === "Balanced" || qpProfile === "Conservative") {
       setProfile(qpProfile);
     }
     if (qpRows && qpRows.length) {
@@ -76,7 +75,6 @@ export default function NewGradeClient() {
     } catch {}
   }, [provider, profile, rows]);
 
-  // Treat empty weights as 0 for totals
   const total = useMemo<number>(
     () =>
       rows.reduce<number>(
@@ -90,7 +88,7 @@ export default function NewGradeClient() {
   const canSubmit = provider.length > 0 && allWeightsFilled && Math.abs(total - 100) < 0.1;
 
   function addRow() {
-    setRows((r) => [...r, { symbol: "", weight: "" }]); // start empty
+    setRows((r) => [...r, { symbol: "", weight: "" }]);
   }
 
   function removeRow(i: number) {
@@ -102,10 +100,8 @@ export default function NewGradeClient() {
       r.map((row, idx) => {
         if (idx !== i) return row;
         if (key === "weight") {
-          // allow empty string while typing; strip non-numeric chars
           const cleaned = v.replace(/[^0-9.]/g, "");
           if (cleaned === "") return { ...row, weight: "" };
-          // handle cases like ".", "00.", "1."
           const asNumber = Number(cleaned);
           return { ...row, weight: isNaN(asNumber) ? "" : asNumber };
         } else {
@@ -116,7 +112,7 @@ export default function NewGradeClient() {
   }
 
   function computeGrade(p: InvestorProfile, totalWeight: number): number {
-    const base = p === "Aggressive Growth" ? 4.5 : p === "Balanced" ? 3.8 : 4.1;
+    const base = p === "Growth" ? 4.3 : p === "Balanced" ? 3.8 : 3.3;
     const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100);
     return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
   }
@@ -159,9 +155,9 @@ export default function NewGradeClient() {
           value={profile}
           onChange={(e) => setProfile(e.target.value as InvestorProfile)}
         >
-          <option value="Aggressive Growth">Aggressive Growth</option>
           <option value="Growth">Growth</option>
           <option value="Balanced">Balanced</option>
+          <option value="Conservative">Conservative</option>
         </select>
       </section>
 
@@ -178,7 +174,7 @@ export default function NewGradeClient() {
             <input
               inputMode="decimal"
               pattern="[0-9]*\.?[0-9]*"
-              type="text" // use text so we can keep "" and intermediate values like "."
+              type="text"
               className="col-span-3 border rounded-md p-2"
               placeholder="Weight %"
               value={row.weight === "" ? "" : String(row.weight)}
