@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import StepNav from "@/app/components/StepNav"; // ← added import
+import StepNav from "@/app/components/StepNav"; // <- ensure THIS path
 
 export default function ReviewPage() {
   const [loading, setLoading] = useState(false);
@@ -15,17 +15,15 @@ export default function ReviewPage() {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // planKey "review" uses your live price set in envs (STRIPE_PRICE_401K_REVIEW)
         body: JSON.stringify({
           planKey: "review",
-          // If you want to auto-apply your 100% promo, pass its Promotion Code ID here:
           // promotionCodeId: "promo_XXXXXXXXXXXX",
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to create checkout session");
-      window.location.href = data.url; // Send to Stripe Checkout
+      window.location.href = data.url;
     } catch (e: any) {
       setErr(e.message || "Something went wrong");
       setLoading(false);
@@ -34,7 +32,7 @@ export default function ReviewPage() {
 
   return (
     <>
-      {/* Stepper at top */}
+      {/* Stepper should be OUTSIDE main, same as upload page */}
       <StepNav current="pay" />
 
       <main className="max-w-xl mx-auto px-4 py-10">
@@ -42,8 +40,7 @@ export default function ReviewPage() {
           Book a 30-Minute 401(k) Review
         </h1>
         <p className="text-sm text-gray-600 mb-6">
-          $149 one-time. After checkout you’ll securely upload your 401(k)
-          statement and then pick a time on our calendar.
+          $149 one-time. After checkout you’ll securely upload your 401(k) statement and then pick a time on our calendar.
         </p>
 
         <button
@@ -54,12 +51,8 @@ export default function ReviewPage() {
             backgroundColor: "#0b59c7",
             boxShadow: "0 2px 6px rgba(11, 89, 199, 0.3)",
           }}
-          onMouseEnter={(e) =>
-            (e.currentTarget.style.backgroundColor = "#0a4fb5")
-          }
-          onMouseLeave={(e) =>
-            (e.currentTarget.style.backgroundColor = "#0b59c7")
-          }
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#0a4fb5")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#0b59c7")}
         >
           {loading ? "Opening Checkout…" : "Book Now — $149"}
         </button>
@@ -68,8 +61,7 @@ export default function ReviewPage() {
 
         <div className="mt-8 text-xs text-gray-500">
           <p>
-            Have a promo code? You can enter it on the Stripe checkout page. If
-            you prefer auto-apply, we can enable that for you on request.
+            Have a promo code? You can enter it on the Stripe checkout page. If you prefer auto-apply, we can enable that for you on request.
           </p>
         </div>
       </main>
