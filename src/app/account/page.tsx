@@ -49,7 +49,7 @@ async function sendMagicLink(formData: FormData) {
   return { ok: true };
 }
 
-// ✅ Fixes applied here: single-arg signature, and redirect after revalidatePath
+// uses single-arg signature; redirects with ?updated=1
 async function updatePrefs(formData: FormData) {
   "use server";
   try {
@@ -92,7 +92,7 @@ async function updatePrefs(formData: FormData) {
     }
 
     revalidatePath("/account");
-    redirect("/account?updated=1"); // ← force a fresh render so selects reflect new values
+    redirect("/account?updated=1");
   } catch (e: any) {
     console.error("[account:updatePrefs] error:", e?.message || e);
     return { ok: false, error: "Could not save preferences. Please try again." };
@@ -187,10 +187,11 @@ async function getContext() {
 export default async function AccountPage({
   searchParams = {},
 }: {
-  searchParams?: { error?: string };
+  searchParams?: { error?: string; updated?: string };
 }) {
   const { email, reports, provider, profile } = await getContext();
   const errorMsg = searchParams?.error || "";
+  const justUpdated = searchParams?.updated === "1";
 
   if (!email) {
     return (
@@ -283,12 +284,25 @@ export default async function AccountPage({
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold mb-3">Provider & Profile</h2>
+        <h2 className="text-xl font-semibold mb-1">Provider & Profile</h2>
+
+        {/* Tiny success note after saving */}
+        {justUpdated && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-3 inline-flex items-center gap-2 rounded-md bg-green-50 text-green-800 border border-green-200 px-2.5 py-1 text-sm"
+          >
+            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+            Updated!
+          </div>
+        )}
+
         <form action={updatePrefs} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Provider</label>
             <select
-              key={`provider-${provider}`} // ← remount with new defaults
+              key={`provider-${provider}`} // remount with new defaults
               name="provider"
               defaultValue={provider || ""}
               className="w-full border rounded-lg px-3 py-2 bg-white"
@@ -308,7 +322,7 @@ export default async function AccountPage({
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Profile</label>
             <select
-              key={`profile-${profile}`} // ← remount with new defaults
+              key={`profile-${profile}`} // remount with new defaults
               name="profile"
               defaultValue={profile || ""}
               className="w-full border rounded-lg px-3 py-2 bg-white"
