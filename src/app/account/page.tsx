@@ -24,7 +24,6 @@ function safeCookie(name: string): string {
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" }) : null;
 
-// Exact lists you requested:
 const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
 const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 
@@ -49,7 +48,6 @@ async function sendMagicLink(formData: FormData) {
   return { ok: true };
 }
 
-// uses single-arg signature; redirects with ?updated=1
 async function updatePrefs(formData: FormData) {
   "use server";
   try {
@@ -91,8 +89,17 @@ async function updatePrefs(formData: FormData) {
       return { ok: false, error: "No order found to update for this account." };
     }
 
+    // Flash cookie so the page can show "Updated!" without relying on URL params.
+    const c = cookies();
+    c.set("account_updated", "1", {
+      path: "/account",
+      httpOnly: false,         // readable by client if you ever want
+      sameSite: "lax",
+      maxAge: 60,              // 1 minute is plenty
+    });
+
     revalidatePath("/account");
-    redirect("/account?updated=1");
+    redirect("/account");
   } catch (e: any) {
     console.error("[account:updatePrefs] error:", e?.message || e);
     return { ok: false, error: "Could not save preferences. Please try again." };
@@ -191,7 +198,10 @@ export default async function AccountPage({
 }) {
   const { email, reports, provider, profile } = await getContext();
   const errorMsg = searchParams?.error || "";
-  const justUpdated = searchParams?.updated === "1";
+
+  // Show "Updated!" if query param OR flash cookie exists
+  const cookieUpdated = cookies().get("account_updated")?.value === "1";
+  const justUpdated = searchParams?.updated === "1" || cookieUpdated;
 
   if (!email) {
     return (
@@ -240,6 +250,84 @@ export default async function AccountPage({
       </section>
 
       <section>
+        <h2 className="text-xl font-semibold mb-1">Provider & Profile</h2>
+
+        {justUpdated && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mb-3 inline-flex items-center gap-2 rounded-md bg-green-50 text-green-800 border border-green-200 px-2.5 py-1 text-sm"
+          >
+            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+            Updated!
+          </div>
+        )}
+
+        <form action={updatePrefs} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+          <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">Provider</label>
+            <select
+              key={`provider-${provider}`}
+              name="provider"
+              defaultValue={provider || ""}
+              className="w-full border rounded-lg px-3 py-2 bg-white"
+              required
+            >
+              <option value="" disabled>
+                Select a provider
+              </option>
+              {PROVIDERS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">Profile</label>
+            <select
+              key={`profile-${profile}`}
+              name="profile"
+              defaultValue={profile || ""}
+              className="w-full border rounded-lg px-3 py-2 bg-white"
+              required
+            >
+              <option value="" disabled>
+                Select a profile
+              </option>
+              {PROFILES.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-1">
+            <button
+              type="submit"
+              className="w-full inline-flex items-center justify-center rounded-lg px-4 py-2 bg-sky-600 text-white font-semibold"
+            >
+              Save
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold mb-3">Billing</h2>
+        <form action={createPortalAction}>
+          <button className="inline-flex items-center rounded-lg px-4 py-2 bg-slate-900 text-white font-semibold" type="submit">
+            Manage Billing
+          </button>
+        </form>
+        <p className="text-slate-500 text-sm mt-2">
+          Update payment method, download invoices, or cancel your subscription.
+        </p>
+      </section>
+
+      <section>
         <h2 className="text-xl font-semibold mb-3">Past Reports</h2>
         {reports.length === 0 ? (
           <p className="text-slate-600">No reports yet.</p>
@@ -281,85 +369,6 @@ export default async function AccountPage({
             })}
           </ul>
         )}
-      </section>
-
-      <section>
-        <h2 className="text-xl font-semibold mb-1">Provider & Profile</h2>
-
-        {/* Tiny success note after saving */}
-        {justUpdated && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="mb-3 inline-flex items-center gap-2 rounded-md bg-green-50 text-green-800 border border-green-200 px-2.5 py-1 text-sm"
-          >
-            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-            Updated!
-          </div>
-        )}
-
-        <form action={updatePrefs} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-          <div className="sm:col-span-1">
-            <label className="text-sm text-slate-600">Provider</label>
-            <select
-              key={`provider-${provider}`} // remount with new defaults
-              name="provider"
-              defaultValue={provider || ""}
-              className="w-full border rounded-lg px-3 py-2 bg-white"
-              required
-            >
-              <option value="" disabled>
-                Select a provider
-              </option>
-              {PROVIDERS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="sm:col-span-1">
-            <label className="text-sm text-slate-600">Profile</label>
-            <select
-              key={`profile-${profile}`} // remount with new defaults
-              name="profile"
-              defaultValue={profile || ""}
-              className="w-full border rounded-lg px-3 py-2 bg-white"
-              required
-            >
-              <option value="" disabled>
-                Select a profile
-              </option>
-              {PROFILES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="sm:col-span-1">
-            <button
-              type="submit"
-              className="w-full inline-flex items-center justify-center rounded-lg px-4 py-2 bg-sky-600 text-white font-semibold"
-            >
-              Save
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section>
-        <h2 className="text-xl font-semibold mb-3">Billing</h2>
-        <form action={createPortalAction}>
-          <button className="inline-flex items-center rounded-lg px-4 py-2 bg-slate-900 text-white font-semibold" type="submit">
-            Manage Billing
-          </button>
-        </form>
-        <p className="text-slate-500 text-sm mt-2">
-          Update payment method, download invoices, or cancel your subscription.
-        </p>
       </section>
     </main>
   );
