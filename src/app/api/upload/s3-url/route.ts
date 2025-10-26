@@ -131,8 +131,7 @@ export async function POST(req: NextRequest) {
       Bucket: S3_BUCKET,
       Key: key,
       ContentType: contentType,
-      ACL: "private",
-      Metadata: {
+        Metadata: {
         uploader_email: email,
         uploader_name: name || "",
         source: "gy401k-review",
