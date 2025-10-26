@@ -40,7 +40,6 @@ export async function POST(req: NextRequest) {
       ContentType: contentType,
       ACL: "private",
       Metadata: { uploader_email: safeEmail, source: "gy401k-review" },
-      ServerSideEncryption: "AES256",
     });
 
     const uploadUrl = await getSignedUrl(s3, putCmd, { expiresIn: 15 * 60 });
