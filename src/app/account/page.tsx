@@ -13,20 +13,9 @@ export const dynamic = "force-dynamic";
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" }) : null;
 
-// Tweak these lists as you like
-const PROVIDERS = [
-  "Fidelity",
-  "Vanguard",
-  "Schwab",
-  "T. Rowe Price",
-  "Empower",
-  "Principal",
-  "John Hancock",
-  "ADP",
-  "Other",
-];
-
-const PROFILES = ["Conservative", "Moderate", "Growth", "Aggressive"];
+// Exact lists you requested:
+const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"];
+const PROFILES = ["Growth", "Balanced", "Conservative"];
 
 /* ───────────────────── Server Actions ───────────────────── */
 
@@ -69,17 +58,23 @@ async function updatePrefs(_: any, formData: FormData) {
   return { ok: true };
 }
 
-async function createPortal() {
+async function createPortalAction() {
   "use server";
-  if (!stripe) {
-    return { ok: false, error: "Stripe not configured" };
-  }
 
+  const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+  // Must be signed in
   const token = cookies().get("acct")?.value || "";
   const claims = await verifyAccountToken(token);
-  if (!claims) return { ok: false, error: "Unauthorized" };
+  if (!claims) {
+    redirect(`/account?error=${encodeURIComponent("Please sign in again via a magic link.")}`);
+  }
 
-  // Lookup Stripe customer id for this email
+  // Stripe configured?
+  if (!stripe) {
+    redirect(`/account?error=${encodeURIComponent("Stripe not configured. Set STRIPE_SECRET_KEY.")}`);
+  }
+
+  // Lookup stripe_customer_id for this email
   const r: any = await query(
     `SELECT stripe_customer_id
        FROM public.orders
@@ -87,22 +82,21 @@ async function createPortal() {
         AND plan_key = 'annual'
       ORDER BY created_at DESC
       LIMIT 1`,
-    [claims.email]
+    [claims!.email]
   );
   const rows = Array.isArray(r?.rows) ? r.rows : (Array.isArray(r) ? r : []);
   const customerId: string | undefined = rows[0]?.stripe_customer_id;
 
   if (!customerId) {
-    return { ok: false, error: "No Stripe customer found for this account." };
+    redirect(`/account?error=${encodeURIComponent("No Stripe customer found for this account.")}`);
   }
 
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const session = await stripe.billingPortal.sessions.create({
-    customer: customerId,
+  // Create portal session and redirect
+  const session = await (stripe as Stripe).billingPortal.sessions.create({
+    customer: customerId as string,
     return_url: `${base}/account`,
   });
 
-  // Server-side redirect to Stripe portal
   redirect(session.url);
 }
 
@@ -157,8 +151,13 @@ async function getContext() {
 
 /* ───────────────────── Page Component ───────────────────── */
 
-export default async function AccountPage() {
+export default async function AccountPage({
+  searchParams,
+}: {
+  searchParams?: { error?: string };
+}) {
   const { email, reports, provider, profile } = await getContext();
+  const errorMsg = searchParams?.error || "";
 
   if (!email) {
     // Not signed in → show magic link request
@@ -189,6 +188,12 @@ export default async function AccountPage() {
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
+      {errorMsg ? (
+        <div className="border border-red-300 bg-red-50 text-red-800 rounded-md px-3 py-2">
+          {errorMsg}
+        </div>
+      ) : null}
+
       <section>
         <h1 className="text-2xl font-semibold">Your Account</h1>
         <p className="text-slate-600">
@@ -297,12 +302,14 @@ export default async function AccountPage() {
 
       <section>
         <h2 className="text-xl font-semibold mb-3">Billing</h2>
-        <form action={createPortal}>
+        <form action={createPortalAction}>
           <button className="inline-flex items-center rounded-lg px-4 py-2 bg-slate-900 text-white font-semibold" type="submit">
             Manage Billing
           </button>
         </form>
-        <p className="text-slate-500 text-sm mt-2">Update payment method, download invoices, or cancel your subscription.</p>
+        <p className="text-slate-500 text-sm mt-2">
+          Update payment method, download invoices, or cancel your subscription.
+        </p>
       </section>
     </main>
   );
