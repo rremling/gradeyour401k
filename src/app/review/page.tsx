@@ -41,12 +41,18 @@ export default function ReviewPage() {
       <button
         onClick={() => startCheckout()}
         disabled={loading}
-        className="w-full bg-black text-white rounded-xl py-3 font-medium hover:opacity-90 disabled:opacity-50"
+        className="w-full rounded-xl py-3 font-medium text-white transition 
+                   disabled:opacity-50"
+        style={{
+          backgroundColor: "#0b59c7",
+          boxShadow: "0 2px 6px rgba(11, 89, 199, 0.3)",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#0a4fb5")}
+        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "#0b59c7")}
       >
         {loading ? "Opening Checkout…" : "Book Now — $149"}
       </button>
 
-      {/* Optional helper text / error */}
       {err && <p className="mt-3 text-sm text-red-600">{err}</p>}
 
       <div className="mt-8 text-xs text-gray-500">
