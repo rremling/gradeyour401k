@@ -59,66 +59,57 @@ export default function UploadClient() {
       setStatus("signing");
       setInfo("Preparing secure upload…");
 
-      // ---- STEP 1: get a signed URL (adjust to your API routes if different) ----
-      const signRes = await fetch(`/api/uploads/sign?session_id=${encodeURIComponent(sessionId)}&filename=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}`, {
-        method: "POST",
-      });
-      if (!signRes.ok) throw new Error("Unable to get upload URL.");
-      const { uploadUrl, publicUrl, fields } = await signRes.json();
-
-      // ---- STEP 2: perform the upload ----
-      setStatus("uploading");
-      setInfo("Uploading file…");
-
-      let ok = false;
-
-      // If you’re using S3 POST form-data
-      if (fields) {
-        const fd = new FormData();
-        Object.entries(fields).forEach(([k, v]) => fd.append(k, String(v)));
-        fd.append("file", file);
-        const upRes = await fetch(uploadUrl, { method: "POST", body: fd });
-        ok = upRes.ok;
-      } else {
-        // If you’re using PUT to a pre-signed URL
-        const upRes = await fetch(uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": file.type, "x-amz-acl": "private" },
-          body: file,
-        });
-        ok = upRes.ok;
-      }
-
-      if (!ok) throw new Error("Upload failed.");
-
-      // ---- STEP 3: notify backend (optional confirm step) ----
-      setStatus("verifying");
-      setInfo("Verifying upload…");
-
-      const confirmRes = await fetch("/api/uploads/confirm", {
+      // ---- STEP 1: request a signed PUT URL from your existing route ----
+      const signRes = await fetch("/api/upload/s3-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: sessionId,
-          email,
-          name,
           filename: file.name,
-          // store the location your sign endpoint returned; adjust key name if needed
-          url: publicUrl || null,
-          content_type: file.type,
-          size: file.size,
+          contentType: file.type,
+          sessionId,   // required by your route to verify paid session
+          email,       // optional
+          name,        // optional
+          purpose: "statement",
         }),
       });
 
-      if (!confirmRes.ok) throw new Error("Verification failed.");
+      if (!signRes.ok) {
+        const err = await signRes.json().catch(() => ({}));
+        throw new Error(err?.error || "Unable to get upload URL.");
+      }
+
+      const { uploadUrl, key } = await signRes.json();
+
+      // ---- STEP 2: PUT the file to S3 using the signed URL ----
+      setStatus("uploading");
+      setInfo("Uploading file…");
+
+      // Keep headers minimal to match the presigned URL.
+      const putRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+
+      if (!putRes.ok) throw new Error("Upload failed.");
+
+      // ---- STEP 3: verify the object exists (your GET verifier) ----
+      setStatus("verifying");
+      setInfo("Verifying upload…");
+
+      const verifyRes = await fetch(`/api/upload/s3-url?key=${encodeURIComponent(key)}`, {
+        method: "GET",
+      });
+      const verify = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok || !verify?.ok) {
+        throw new Error(verify?.error || "Verification failed.");
+      }
 
       // ---- SUCCESS (stay on page) ----
       setUploadedFilename(file.name);
       setStatus("done");
       setInfo(null);
       setError(null);
-      // NOTE: Intentionally NOT routing to another page.
-      // This is the core change: show success panel with CTAs.
     } catch (err: any) {
       console.error(err);
       setStatus("error");
