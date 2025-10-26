@@ -143,10 +143,40 @@ async function createPortalAction() {
 
 async function logoutAction() {
   "use server";
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "";
-  await fetch(`${base}/api/account/logout`, { method: "POST", cache: "no-store" });
-  redirect("/"); // redirects to homepage instead of /account
+  // expire the auth cookie(s)
+  const c = cookies();
+
+  // Adjust domain if you set one when creating the cookie (see note below)
+  const cookieDomain = process.env.COOKIE_DOMAIN || undefined; // e.g. ".gradeyour401k.com"
+  const isSecure = process.env.NODE_ENV !== "development";
+
+  // main account session
+  c.set("acct", "", {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isSecure,
+    maxAge: 0,           // expire immediately
+    domain: cookieDomain // must match how it was originally set
+  });
+
+  // optional “flash” we added earlier
+  c.set("account_updated", "", {
+    path: "/account",
+    httpOnly: false,
+    sameSite: "lax",
+    secure: isSecure,
+    maxAge: 0,
+    domain: cookieDomain
+  });
+
+  // If you have any other related cookies, clear them here the same way:
+  // c.set("admin_session", "", { path: "/", httpOnly: true, sameSite: "lax", secure: isSecure, maxAge: 0, domain: cookieDomain });
+
+  // now go home
+  redirect("/");
 }
+
 
 
 /* ───────────────────── Data Loaders ───────────────────── */
