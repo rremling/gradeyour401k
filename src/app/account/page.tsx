@@ -8,6 +8,16 @@ import Stripe from "stripe";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* ───────────────────── Helpers ───────────────────── */
+
+function safeCookie(name: string): string {
+  try {
+    return cookies().get(name)?.value || "";
+  } catch {
+    return "";
+  }
+}
+
 /* ───────────────────── Config / Options ───────────────────── */
 
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
@@ -40,22 +50,37 @@ async function sendMagicLink(formData: FormData) {
 
 async function updatePrefs(_: any, formData: FormData) {
   "use server";
-  const token = cookies().get("acct")?.value || "";
-  const claims = await verifyAccountToken(token);
-  if (!claims) return { ok: false, error: "Unauthorized" };
+  try {
+    const token = safeCookie("acct");
+    const claims = await verifyAccountToken(token);
+    if (!claims) return { ok: false, error: "Unauthorized" };
 
-  const provider = String(formData.get("provider") || "").trim();
-  const profile = String(formData.get("profile") || "").trim();
+    const provider = String(formData.get("provider") || "").trim();
+    const profile = String(formData.get("profile") || "").trim();
 
-  await query(
-    `UPDATE public.orders
-        SET provider = $1, profile = $2
-      WHERE email = $3
-        AND plan_key = 'annual'`,
-    [provider, profile, claims.email]
-  );
+    await query(
+      `
+      WITH target AS (
+        SELECT id
+          FROM public.orders
+         WHERE email = $3
+         ORDER BY (plan_key = 'annual') DESC, created_at DESC
+         LIMIT 1
+      )
+      UPDATE public.orders o
+         SET provider = $1,
+             profile  = $2
+        FROM target
+       WHERE o.id = target.id
+      `,
+      [provider, profile, claims.email]
+    );
 
-  return { ok: true };
+    return { ok: true };
+  } catch (e: any) {
+    console.error("[account:updatePrefs] error:", e?.message || e);
+    return { ok: false, error: "Could not save preferences. Please try again." };
+  }
 }
 
 async function createPortalAction() {
@@ -63,7 +88,7 @@ async function createPortalAction() {
 
   const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
   // Must be signed in
-  const token = cookies().get("acct")?.value || "";
+  const token = safeCookie("acct");
   const claims = await verifyAccountToken(token);
   if (!claims) {
     redirect(`/account?error=${encodeURIComponent("Please sign in again via a magic link.")}`);
@@ -74,13 +99,12 @@ async function createPortalAction() {
     redirect(`/account?error=${encodeURIComponent("Stripe not configured. Set STRIPE_SECRET_KEY.")}`);
   }
 
-  // Lookup stripe_customer_id for this email
+  // Lookup stripe_customer_id for this email (prefer annual, else latest)
   const r: any = await query(
     `SELECT stripe_customer_id
        FROM public.orders
       WHERE email = $1
-        AND plan_key = 'annual'
-      ORDER BY created_at DESC
+      ORDER BY (plan_key = 'annual') DESC, created_at DESC
       LIMIT 1`,
     [claims!.email]
   );
@@ -110,7 +134,7 @@ async function logoutAction() {
 /* ───────────────────── Data Loaders ───────────────────── */
 
 async function getContext() {
-  const token = cookies().get("acct")?.value || "";
+  const token = safeCookie("acct");
   const claims = await verifyAccountToken(token);
   if (!claims) return { email: null, reports: [] as any[], provider: "", profile: "" };
 
@@ -134,11 +158,12 @@ async function getContext() {
   );
   const reports = Array.isArray(rReports?.rows) ? rReports.rows : (Array.isArray(rReports) ? rReports : []);
 
+  // Prefill from the best available order: prefer annual; else newest of any plan
   const rPrefs: any = await query(
     `SELECT provider, profile
        FROM public.orders
-      WHERE email = $1 AND plan_key = 'annual'
-      ORDER BY created_at DESC
+      WHERE email = $1
+      ORDER BY (plan_key = 'annual') DESC, created_at DESC
       LIMIT 1`,
     [email]
   );
@@ -152,7 +177,7 @@ async function getContext() {
 /* ───────────────────── Page Component ───────────────────── */
 
 export default async function AccountPage({
-  searchParams,
+  searchParams = {},
 }: {
   searchParams?: { error?: string };
 }) {
