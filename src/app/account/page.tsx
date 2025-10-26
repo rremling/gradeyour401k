@@ -1,6 +1,7 @@
 // src/app/account/page.tsx
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { verifyAccountToken } from "@/lib/auth";
 import { query } from "@/lib/db";
 import Stripe from "stripe";
@@ -24,8 +25,8 @@ const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" }) : null;
 
 // Exact lists you requested:
-const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"];
-const PROFILES = ["Growth", "Balanced", "Conservative"];
+const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
+const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 
 /* ───────────────────── Server Actions ───────────────────── */
 
@@ -48,7 +49,8 @@ async function sendMagicLink(formData: FormData) {
   return { ok: true };
 }
 
-async function updatePrefs(_: any, formData: FormData) {
+// ✅ Fix: use the single-argument signature for a plain <form action={updatePrefs}>
+async function updatePrefs(formData: FormData) {
   "use server";
   try {
     const token = safeCookie("acct");
@@ -58,7 +60,15 @@ async function updatePrefs(_: any, formData: FormData) {
     const provider = String(formData.get("provider") || "").trim();
     const profile = String(formData.get("profile") || "").trim();
 
-    await query(
+    // validate against allowed lists (prevents junk writes)
+    const validProvider = PROVIDERS.includes(provider as (typeof PROVIDERS)[number]);
+    const validProfile = PROFILES.includes(profile as (typeof PROFILES)[number]);
+    if (!validProvider || !validProfile) {
+      return { ok: false, error: "Invalid provider or profile." };
+    }
+
+    // Update latest relevant order (prefer annual, else newest)
+    const result: any = await query(
       `
       WITH target AS (
         SELECT id
@@ -69,13 +79,24 @@ async function updatePrefs(_: any, formData: FormData) {
       )
       UPDATE public.orders o
          SET provider = $1,
-             profile  = $2
+             profile  = $2,
+             updated_at = NOW()
         FROM target
        WHERE o.id = target.id
+      RETURNING o.id
       `,
       [provider, profile, claims.email]
     );
 
+    const updated = Array.isArray(result?.rows) ? result.rows.length : (result?.rowCount ?? 0);
+    if (!updated) {
+      // No existing order to attach prefs to — bail gracefully
+      // (Optionally you could insert a lightweight "prefs" row in a prefs table here.)
+      return { ok: false, error: "No order found to update for this account." };
+    }
+
+    // Refresh this page’s data after the mutation
+    revalidatePath("/account");
     return { ok: true };
   } catch (e: any) {
     console.error("[account:updatePrefs] error:", e?.message || e);
@@ -85,21 +106,16 @@ async function updatePrefs(_: any, formData: FormData) {
 
 async function createPortalAction() {
   "use server";
-
   const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  // Must be signed in
   const token = safeCookie("acct");
   const claims = await verifyAccountToken(token);
   if (!claims) {
     redirect(`/account?error=${encodeURIComponent("Please sign in again via a magic link.")}`);
   }
-
-  // Stripe configured?
   if (!stripe) {
     redirect(`/account?error=${encodeURIComponent("Stripe not configured. Set STRIPE_SECRET_KEY.")}`);
   }
 
-  // Lookup stripe_customer_id for this email (prefer annual, else latest)
   const r: any = await query(
     `SELECT stripe_customer_id
        FROM public.orders
@@ -115,7 +131,6 @@ async function createPortalAction() {
     redirect(`/account?error=${encodeURIComponent("No Stripe customer found for this account.")}`);
   }
 
-  // Create portal session and redirect
   const session = await (stripe as Stripe).billingPortal.sessions.create({
     customer: customerId as string,
     return_url: `${base}/account`,
@@ -140,7 +155,6 @@ async function getContext() {
 
   const email = claims.email;
 
-  // Use orders + previews to list downloadable PDFs
   const rReports: any = await query(
     `SELECT
         o.id          AS order_id,
@@ -158,7 +172,6 @@ async function getContext() {
   );
   const reports = Array.isArray(rReports?.rows) ? rReports.rows : (Array.isArray(rReports) ? rReports : []);
 
-  // Prefill from the best available order: prefer annual; else newest of any plan
   const rPrefs: any = await query(
     `SELECT provider, profile
        FROM public.orders
@@ -185,7 +198,6 @@ export default async function AccountPage({
   const errorMsg = searchParams?.error || "";
 
   if (!email) {
-    // Not signed in → show magic link request
     return (
       <main className="mx-auto max-w-xl p-6">
         <h1 className="text-2xl font-semibold mb-2">Access Your Account</h1>
@@ -284,6 +296,7 @@ export default async function AccountPage({
               name="provider"
               defaultValue={provider || ""}
               className="w-full border rounded-lg px-3 py-2 bg-white"
+              required
             >
               <option value="" disabled>
                 Select a provider
@@ -302,6 +315,7 @@ export default async function AccountPage({
               name="profile"
               defaultValue={profile || ""}
               className="w-full border rounded-lg px-3 py-2 bg-white"
+              required
             >
               <option value="" disabled>
                 Select a profile
