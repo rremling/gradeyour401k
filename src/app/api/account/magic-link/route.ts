@@ -5,6 +5,7 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const EMAIL_FROM = process.env.EMAIL_FROM || "reports@gradeyour401k.kenaiinvest.com";
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
 
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function sendViaResend(to: string, subject: string, html: string) {
