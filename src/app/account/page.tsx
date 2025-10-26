@@ -145,8 +145,9 @@ async function logoutAction() {
   "use server";
   const base = process.env.NEXT_PUBLIC_BASE_URL || "";
   await fetch(`${base}/api/account/logout`, { method: "POST", cache: "no-store" });
-  redirect("/account");
+  redirect("/"); // redirects to homepage instead of /account
 }
+
 
 /* ───────────────────── Data Loaders ───────────────────── */
 
