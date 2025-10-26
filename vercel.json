@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/annual-plan",
-      "schedule": "0 5 * * *"
-    }
-  ]
-}
