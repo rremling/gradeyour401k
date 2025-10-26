@@ -1,5 +1,19 @@
 "use client";
 
+import StepNav from "@/app/components/StepNav";
+
+export default function PricingPage() {
+  return (
+    <>
+      <StepNav current="pay" />
+      <main className="max-w-5xl mx-auto px-4 py-8">
+        {/* ...existing content... */}
+      </main>
+    </>
+  );
+}
+
+
 import { useState } from "react";
 
 export default function ReviewPage() {
