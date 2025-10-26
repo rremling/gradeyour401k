@@ -28,12 +28,19 @@ export default function UploadClient() {
     setError(null);
 
     const file = fileRef.current?.files?.[0];
-    if (!file) return setError("Please choose a file to upload.");
-    if (!Object.keys(ALLOWED).includes(file.type)) return setError("Only PDF, JPG, or PNG files are allowed.");
-    if (file.size > MAX_MB * 1024 * 1024) return setError(`File is too large. Max ${MAX_MB} MB.`);
+    if (!name.trim() || !email.trim() || !file) {
+      return setError("Please enter your name, email, and choose a file.");
+    }
+    if (!Object.keys(ALLOWED).includes(file.type)) {
+      return setError("Only PDF, JPG, or PNG files are allowed.");
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      return setError(`File is too large. Max ${MAX_MB} MB.`);
+    }
 
     try {
       setStatus("signing");
+      // Ask our API to create a short-lived pre-signed PUT URL
       const res = await fetch("/api/upload/s3-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -50,6 +57,7 @@ export default function UploadClient() {
       const { uploadUrl, key } = data as { uploadUrl: string; key: string };
 
       setStatus("uploading");
+      // PUT the file directly to S3 with the same Content-Type we signed for
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("PUT", uploadUrl);
@@ -63,11 +71,15 @@ export default function UploadClient() {
       });
 
       setStatus("verifying");
+      // Optional verification (HEAD) on our API
       const verify = await fetch(`/api/upload/s3-url?key=${encodeURIComponent(key)}`);
       const v = await verify.json();
-      if (!verify.ok || !v.ok) throw new Error(v?.error || "Upload verification failed");
+      if (!verify.ok || !v.ok) {
+        throw new Error(v?.error || "Upload verification failed");
+      }
 
       setStatus("done");
+      // Continue to scheduling page on success
       router.push("/schedule");
     } catch (err: any) {
       setStatus("error");
@@ -75,39 +87,85 @@ export default function UploadClient() {
     }
   }
 
+  const chosenFileName = fileRef.current?.files?.[0]?.name;
+
   return (
     <form onSubmit={handleUpload} className="space-y-4 bg-white p-5 rounded-2xl shadow">
-      <div className="grid gap-3">
-        <label className="text-sm font-medium">Name</label>
-        <input className="border rounded px-3 py-2" type="text" value={name} onChange={(e) => setName(e.target.value)} required />
+      {/* Name */}
+      <div className="grid gap-2">
+        <label className="text-sm font-medium">Full Name</label>
+        <input
+          className="border rounded px-3 py-2"
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Jane Doe"
+          autoComplete="name"
+          required
+        />
       </div>
 
-      <div className="grid gap-3">
+      {/* Email */}
+      <div className="grid gap-2">
         <label className="text-sm font-medium">Email</label>
-        <input className="border rounded px-3 py-2" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <input
+          className="border rounded px-3 py-2"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="jane@example.com"
+          autoComplete="email"
+          required
+        />
         <p className="text-xs text-gray-500">We’ll use this to match your payment and send confirmation.</p>
       </div>
 
-      <div className="grid gap-3">
+      {/* Choose File (styled as button) */}
+      <div className="grid gap-2">
         <label className="text-sm font-medium">Statement (PDF, JPG, or PNG)</label>
-        <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="block" required />
-        <p className="text-xs text-gray-500">Max size: {MAX_MB} MB</p>
+
+        <div className="flex items-center gap-3">
+          <label
+            htmlFor="file-upload"
+            className="cursor-pointer inline-block bg-[#0b59c7] text-white font-medium px-4 py-2 rounded-xl hover:bg-[#0a4fb5] transition shadow-md"
+          >
+            Choose File
+          </label>
+          <span className="text-sm text-gray-700 truncate max-w-[60%]">
+            {chosenFileName ? `Selected: ${chosenFileName}` : "No file selected"}
+          </span>
+        </div>
+
+        <input
+          id="file-upload"
+          ref={fileRef}
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+          className="hidden"
+          required
+        />
+        <p className="text-xs text-gray-500">Allowed: PDF, JPG, PNG • Max size: {MAX_MB} MB</p>
       </div>
 
+      {/* Primary action */}
       <button
+        type="submit"
         disabled={status === "signing" || status === "uploading" || status === "verifying"}
-        className="w-full bg-black text-white rounded-xl py-2.5 font-medium hover:opacity-90 disabled:opacity-50"
+        className="w-full bg-[#0b59c7] text-white rounded-xl py-2.5 font-medium hover:bg-[#0a4fb5] transition disabled:opacity-50 shadow-md"
       >
-        {status === "idle" && "Upload Securely"}
+        {status === "idle" && "Send Securely"}
         {status === "signing" && "Preparing secure link…"}
-        {status === "uploading" && `Uploading… ${progress}%`}
+        {status === "uploading" && `Sending… ${progress}%`}
         {status === "verifying" && "Verifying…"}
         {status === "done" && "Done!"}
         {status === "error" && "Try Again"}
       </button>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
-      <p className="text-xs text-gray-500">Files are uploaded over HTTPS and stored privately with encryption at rest.</p>
+
+      <p className="text-xs text-gray-500">
+        Files are uploaded over HTTPS and stored privately with encryption at rest.
+      </p>
     </form>
   );
 }
