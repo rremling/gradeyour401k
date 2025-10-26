@@ -1,3 +1,4 @@
+// (File 1) NewGradeClient component
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -17,6 +18,7 @@ function parseRowsParam(raw: string | null): Holding[] | null {
         .filter((r) => r && typeof r.symbol === "string")
         .map((r) => ({
           symbol: String(r.symbol).toUpperCase(),
+          // accept "", number-like, or default to ""
           weight:
             r.weight === "" || r.weight === null || r.weight === undefined
               ? ""
@@ -75,6 +77,7 @@ export default function NewGradeClient() {
     } catch {}
   }, [provider, profile, rows]);
 
+  // Treat empty weights as 0 for totals
   const total = useMemo<number>(
     () =>
       rows.reduce<number>(
@@ -88,7 +91,7 @@ export default function NewGradeClient() {
   const canSubmit = provider.length > 0 && allWeightsFilled && Math.abs(total - 100) < 0.1;
 
   function addRow() {
-    setRows((r) => [...r, { symbol: "", weight: "" }]);
+    setRows((r) => [...r, { symbol: "", weight: "" }]); // start empty
   }
 
   function removeRow(i: number) {
@@ -100,8 +103,10 @@ export default function NewGradeClient() {
       r.map((row, idx) => {
         if (idx !== i) return row;
         if (key === "weight") {
+          // allow empty string while typing; strip non-numeric chars
           const cleaned = v.replace(/[^0-9.]/g, "");
           if (cleaned === "") return { ...row, weight: "" };
+          // handle cases like ".", "00.", "1."
           const asNumber = Number(cleaned);
           return { ...row, weight: isNaN(asNumber) ? "" : asNumber };
         } else {
@@ -145,6 +150,7 @@ export default function NewGradeClient() {
           <option value="vanguard">Vanguard</option>
           <option value="schwab">Charles Schwab</option>
           <option value="voya">Voya</option>
+          <option value="other">Other</option>
         </select>
       </section>
 
@@ -174,7 +180,7 @@ export default function NewGradeClient() {
             <input
               inputMode="decimal"
               pattern="[0-9]*\.?[0-9]*"
-              type="text"
+              type="text" // use text so we can keep "" and intermediate values like "."
               className="col-span-3 border rounded-md p-2"
               placeholder="Weight %"
               value={row.weight === "" ? "" : String(row.weight)}
