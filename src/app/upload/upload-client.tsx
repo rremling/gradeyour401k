@@ -1,143 +1,172 @@
 "use client";
 
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState, useRef, useEffect } from "react";
+import { useRef, useState } from "react";
+
+const MAX_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB || "15");
+const ALLOWED = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+} as const;
 
 export default function UploadClient() {
   const params = useSearchParams();
   const router = useRouter();
+  const sessionId = params.get("session_id") || undefined;
 
-  // 👇 read session_id from the URL placed by Stripe success_url
-  const sessionId = params.get("session_id") || "";
-
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState<string>("");
+  const [name, setName] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [status, setStatus] = useState<"idle"|"signing"|"uploading"|"verifying"|"done"|"error">("idle");
+  const [status, setStatus] = useState<"idle" | "signing" | "uploading" | "verifying" | "done" | "error">("idle");
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-
-  // Optional: surface a friendly message if sessionId missing
-  useEffect(() => {
-    if (!sessionId) {
-      setError("This page must be opened from the checkout success page so we can verify your session.");
-    }
-  }, [sessionId]);
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
     const file = fileRef.current?.files?.[0];
-
-    if (!sessionId) {
-      setError("Missing session ID. Please complete checkout again.");
-      return;
-    }
     if (!name.trim() || !email.trim() || !file) {
-      setError("Please enter your name, email, and choose a file.");
-      return;
+      return setError("Please enter your name, email, and choose a file.");
+    }
+    if (!Object.keys(ALLOWED).includes(file.type)) {
+      return setError("Only PDF, JPG, or PNG files are allowed.");
+    }
+    if (file.size > MAX_MB * 1024 * 1024) {
+      return setError(`File is too large. Max ${MAX_MB} MB.`);
     }
 
     try {
       setStatus("signing");
-      // 1) ask backend for presigned PUT url (must include sessionId)
+      // Ask our API to create a short-lived pre-signed PUT URL
       const res = await fetch("/api/upload/s3-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           filename: file.name,
           contentType: file.type,
-          sessionId,           // 👈 REQUIRED
-          email,
-          name,
-          purpose: "upload",
+          sessionId,
+          email: email || undefined,
+          name: name || undefined,
         }),
       });
 
+      // Expect { uploadUrl, key } — not { url, fields }
       const data = await res.json();
-      if (!res.ok || !data?.uploadUrl) {
+      if (!res.ok || !data?.uploadUrl || !data?.key) {
         throw new Error(data?.error || "Failed to get upload URL");
       }
+      const { uploadUrl, key } = data as { uploadUrl: string; key: string };
 
-      // 2) PUT directly to S3 — no headers
       setStatus("uploading");
-      const put = await fetch(data.uploadUrl, { method: "PUT", body: file });
-      if (!put.ok) throw new Error(`S3 upload failed (${put.status})`);
+      // PUT the file directly to S3 with the same Content-Type we signed for
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", uploadUrl);
+        xhr.setRequestHeader("Content-Type", file.type);
+        xhr.upload.onprogress = (evt) => {
+          if (evt.lengthComputable) setProgress(Math.round((evt.loaded / evt.total) * 100));
+        };
+        xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status})`)));
+        xhr.onerror = () => reject(new Error("Network error during upload"));
+        xhr.send(file);
+      });
 
-      // 3) optional verify
       setStatus("verifying");
-      const verify = await fetch(`/api/upload/s3-url?key=${encodeURIComponent(data.key)}`);
+      // Optional verification via our API
+      const verify = await fetch(`/api/upload/s3-url?key=${encodeURIComponent(key)}`);
       const v = await verify.json();
-      if (!verify.ok || !v?.ok) throw new Error(v?.error || "Upload verification failed");
+      if (!verify.ok || !v.ok) throw new Error(v?.error || "Upload verification failed");
 
       setStatus("done");
-      // go to your scheduling or confirmation page
       router.push("/schedule");
-    } catch (e: any) {
+    } catch (err: any) {
       setStatus("error");
-      setError(e.message || "Upload failed");
+      setError(err.message || "Upload failed");
     }
   }
 
+  const chosenFileName = fileRef.current?.files?.[0]?.name;
+
   return (
     <form onSubmit={handleUpload} className="space-y-4 bg-white p-5 rounded-2xl shadow">
-      {!sessionId && (
-        <div className="text-sm text-red-600">
-          Missing session ID. Please start from the <a className="underline" href="/review">review checkout</a> so we can verify your purchase.
-        </div>
-      )}
-
-      <div>
-        <label className="block text-sm font-medium mb-1">Full Name</label>
+      {/* Name */}
+      <div className="grid gap-2">
+        <label className="text-sm font-medium">Full Name</label>
         <input
+          className="border rounded px-3 py-2"
           type="text"
-          className="w-full border rounded px-3 py-2"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Jane Doe"
+          autoComplete="name"
           required
         />
       </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-1">Email</label>
+      {/* Email */}
+      <div className="grid gap-2">
+        <label className="text-sm font-medium">Email</label>
         <input
+          className="border rounded px-3 py-2"
           type="email"
-          className="w-full border rounded px-3 py-2"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="jane@example.com"
+          autoComplete="email"
           required
         />
+        <p className="text-xs text-gray-500">We’ll use this to match your payment and send confirmation.</p>
       </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-1">Statement (PDF, JPG, or PNG)</label>
+      {/* Choose File (styled as button) */}
+      <div className="grid gap-2">
+        <label className="text-sm font-medium">Statement (PDF, JPG, or PNG)</label>
+
+        <div className="flex items-center gap-3">
+          <label
+            htmlFor="file-upload"
+            className="cursor-pointer inline-block bg-[#0b59c7] text-white font-medium px-4 py-2 rounded-xl hover:bg-[#0a4fb5] transition shadow-md"
+          >
+            Choose File
+          </label>
+          <span className="text-sm text-gray-700 truncate max-w-[60%]">
+            {chosenFileName ? `Selected: ${chosenFileName}` : "No file selected"}
+          </span>
+        </div>
+
         <input
+          id="file-upload"
           ref={fileRef}
           type="file"
-          accept=".pdf,.jpg,.jpeg,.png"
-          className="w-full border rounded px-3 py-2"
+          accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+          className="hidden"
           required
         />
-        <p className="text-xs text-gray-500 mt-1">Allowed: PDF, JPG, PNG • Max size as configured.</p>
+        <p className="text-xs text-gray-500">Allowed: PDF, JPG, PNG • Max size: {MAX_MB} MB</p>
       </div>
 
+      {/* Primary action */}
       <button
         type="submit"
-        disabled={!sessionId || status === "signing" || status === "uploading" || status === "verifying"}
-        className="w-full bg-[#0b59c7] text-white rounded-xl py-3 font-medium hover:bg-[#0a4fb5] transition disabled:opacity-50 shadow-md"
+        disabled={status === "signing" || status === "uploading" || status === "verifying"}
+        className="w-full bg-[#0b59c7] text-white rounded-xl py-2.5 font-medium hover:bg-[#0a4fb5] transition disabled:opacity-50 shadow-md"
       >
         {status === "idle" && "Send Securely"}
         {status === "signing" && "Preparing secure link…"}
-        {status === "uploading" && "Sending…"}
+        {status === "uploading" && `Sending… ${progress}%`}
         {status === "verifying" && "Verifying…"}
         {status === "done" && "Done!"}
         {status === "error" && "Try Again"}
       </button>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <p className="text-xs text-gray-500">
+        Files are uploaded over HTTPS and stored privately with encryption at rest.
+      </p>
     </form>
   );
 }
