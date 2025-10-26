@@ -130,13 +130,6 @@ export async function POST(req: NextRequest) {
     const putCmd = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
-      ContentType: contentType,
-        Metadata: {
-        uploader_email: email,
-        uploader_name: name || "",
-        source: "gy401k-review",
-        purpose: (purpose || "upload") as string, // e.g. "resend" | "additional" | "upload"
-      },
     });
     const uploadUrl = await getSignedUrl(s3, putCmd, { expiresIn: 15 * 60 });
 
