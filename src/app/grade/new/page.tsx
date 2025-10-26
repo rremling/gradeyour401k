@@ -1,4 +1,4 @@
-// src/app/grade/new/page.tsx
+// (File 2) src/app/grade/new/page.tsx
 "use client";
 
 import { useMemo, useState } from "react";
@@ -294,9 +294,6 @@ export default function NewGradePage() {
           <option value="fidelity">Fidelity</option>
           <option value="vanguard">Vanguard</option>
           <option value="schwab">Charles Schwab</option>
-          <option value="invesco">Invesco</option>
-          <option value="blackrock">BlackRock / iShares</option>
-          <option value="state-street">State Street / SPDR</option>
           <option value="voya">Voya</option>
           <option value="other">Other</option>
         </select>
