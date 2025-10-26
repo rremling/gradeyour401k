@@ -284,15 +284,23 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
       <li style="margin:6px 0;">Log in to your 401(k) plan.</li>
       <li style="margin:6px 0;">Update your allocations to align with your <em>Investor Profile</em> and our <em>Market Profile</em> guidance in the attached report.</li>
       <li style="margin:6px 0;">Save/confirm your changes inside the plan.</li>
-      <li style="margin:6px 0;">Optional: schedule a quick review if you want us to double-check your changes.</li>
+      <!-- Updated CTA line below -->
+      <li style="margin:6px 0;">
+        <strong>Ready for a pro’s second opinion?</strong><br />
+        Schedule a <strong>30-Minute 401(k) Review Call</strong> with Roger Remling, CFP®. We’ll confirm your updates, uncover hidden inefficiencies, and ensure your portfolio’s flight path is on course.
+      </li>
     </ol>
 
-    <div style="margin:20px 0 24px;">
-      <a href="https://kenaiinvest.appointlet.com/" 
-         style="display:inline-block;padding:10px 16px;background:#0b59c7;color:#fff;text-decoration:none;border-radius:6px;">
-        Schedule a 15-min review
+    <!-- Updated CTA button -->
+    <div style="margin:20px 0 10px;">
+      <a href="https://gradeyour401k.com/review"
+         style="display:inline-block;padding:12px 18px;background:#111111;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;">
+        Book Your 401(k) Review Call — $149
       </a>
     </div>
+    <p style="margin:0 0 16px 0; font-size:14px; color:#555;">
+      After checkout you’ll securely upload your 401(k) statement and pick a time on our calendar.
+    </p>
 
     <p style="margin:0 0 16px 0;">Questions? Just give us a call—happy to help.</p>
     <p style="margin:0 0 8px 0;">— GradeYour401k</p>
