@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 
-type InvestorProfile = "Aggressive Growth" | "Growth" | "Balanced";
+type InvestorProfile = "Growth" | "Balanced" | "Conservative";
 type Holding = { symbol: string; weight: number | "" };
 
 // ---- Provider display names ----
@@ -207,7 +207,7 @@ export default function NewGradePage() {
   // ---- Grade logic ----
   function computeGrade(profileInput: InvestorProfile, totalWeight: number): number {
     const base =
-      profileInput === "Aggressive Growth" ? 4.5 : profileInput === "Balanced" ? 3.8 : 4.1;
+      profileInput === "Growth" ? 4.3 : profileInput === "Balanced" ? 3.8 : 3.3;
     const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100);
     return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
   }
@@ -310,9 +310,9 @@ export default function NewGradePage() {
           value={profile}
           onChange={(e) => setProfile(e.target.value as InvestorProfile)}
         >
-          <option value="Aggressive Growth">Aggressive Growth</option>
           <option value="Growth">Growth</option>
           <option value="Balanced">Balanced</option>
+          <option value="Conservative">Conservative</option>
         </select>
       </section>
 
