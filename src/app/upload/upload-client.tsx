@@ -10,6 +10,8 @@ const ALLOWED = {
   "image/png": ".png",
 } as const;
 
+type Status = "idle" | "signing" | "uploading" | "verifying" | "done" | "error";
+
 export default function UploadClient() {
   const params = useSearchParams();
   const router = useRouter();
@@ -19,9 +21,15 @@ export default function UploadClient() {
   const [name, setName] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [status, setStatus] = useState<"idle" | "signing" | "uploading" | "verifying" | "done" | "error">("idle");
+  const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // NEW: track how many uploads are remaining for this session (as reported by the server)
+  const [remaining, setRemaining] = useState<number | null>(null);
+
+  // NEW: purpose of this upload (default "upload"; switch to "additional" for resends/extra docs)
+  const [purpose, setPurpose] = useState<"upload" | "additional">("upload");
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
@@ -37,6 +45,9 @@ export default function UploadClient() {
     if (file.size > MAX_MB * 1024 * 1024) {
       return setError(`File is too large. Max ${MAX_MB} MB.`);
     }
+    if (!sessionId) {
+      return setError("This upload link is missing a session_id. Please complete checkout first.");
+    }
 
     try {
       setStatus("signing");
@@ -50,15 +61,22 @@ export default function UploadClient() {
           sessionId,
           email: email || undefined,
           name: name || undefined,
+          purpose, // <-- NEW
         }),
       });
 
-      // Expect { uploadUrl, key } — not { url, fields }
       const data = await res.json();
       if (!res.ok || !data?.uploadUrl || !data?.key) {
         throw new Error(data?.error || "Failed to get upload URL");
       }
-      const { uploadUrl, key } = data as { uploadUrl: string; key: string };
+      const { uploadUrl, key, remaining: serverRemaining } = data as {
+        uploadUrl: string;
+        key: string;
+        remaining?: number;
+      };
+
+      // Server returns remaining after counting this presign
+      if (typeof serverRemaining === "number") setRemaining(serverRemaining);
 
       setStatus("uploading");
       // PUT the file directly to S3 with the same Content-Type we signed for
@@ -81,6 +99,7 @@ export default function UploadClient() {
       if (!verify.ok || !v.ok) throw new Error(v?.error || "Upload verification failed");
 
       setStatus("done");
+      // On success, send them to scheduling
       router.push("/schedule");
     } catch (err: any) {
       setStatus("error");
@@ -89,6 +108,15 @@ export default function UploadClient() {
   }
 
   const chosenFileName = fileRef.current?.files?.[0]?.name;
+
+  // Helper to quickly start an "additional" upload intent (resend/extra doc)
+  function prepareAdditionalUpload() {
+    setPurpose("additional");
+    setError(null);
+    setStatus("idle");
+    // Keep name/email; let them choose another file
+    if (fileRef.current) fileRef.current.value = "";
+  }
 
   return (
     <form onSubmit={handleUpload} className="space-y-4 bg-white p-5 rounded-2xl shadow">
@@ -145,7 +173,9 @@ export default function UploadClient() {
           className="hidden"
           required
         />
-        <p className="text-xs text-gray-500">Allowed: PDF, JPG, PNG • Max size: {MAX_MB} MB</p>
+        <p className="text-xs text-gray-500">
+          Allowed: PDF, JPG, PNG • Max size: {MAX_MB} MB
+        </p>
       </div>
 
       {/* Primary action */}
@@ -154,7 +184,7 @@ export default function UploadClient() {
         disabled={status === "signing" || status === "uploading" || status === "verifying"}
         className="w-full bg-[#0b59c7] text-white rounded-xl py-2.5 font-medium hover:bg-[#0a4fb5] transition disabled:opacity-50 shadow-md"
       >
-        {status === "idle" && "Send Securely"}
+        {status === "idle" && (purpose === "additional" ? "Send Another Document Securely" : "Send Securely")}
         {status === "signing" && "Preparing secure link…"}
         {status === "uploading" && `Sending… ${progress}%`}
         {status === "verifying" && "Verifying…"}
@@ -162,11 +192,29 @@ export default function UploadClient() {
         {status === "error" && "Try Again"}
       </button>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {/* Secondary action: prepare another upload (doesn't submit) */}
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-gray-500">
+          Files are uploaded over HTTPS and stored privately with encryption at rest.
+        </div>
+        {typeof remaining === "number" && (
+          <div className="text-xs font-medium text-gray-700">
+            Uploads remaining: {remaining}
+          </div>
+        )}
+      </div>
 
-      <p className="text-xs text-gray-500">
-        Files are uploaded over HTTPS and stored privately with encryption at rest.
-      </p>
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={prepareAdditionalUpload}
+          className="text-sm font-medium text-[#0b59c7] hover:underline"
+        >
+          Send another document
+        </button>
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
     </form>
   );
 }
