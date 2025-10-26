@@ -24,13 +24,8 @@ async function getEmailFromStripe(sessionId?: string): Promise<string | null> {
 export async function POST(req: NextRequest) {
   try {
     const { filename, contentType, sessionId, email } = await req.json();
-
-    if (!filename || !contentType) {
-      return NextResponse.json({ error: "Missing filename or contentType" }, { status: 400 });
-    }
-    if (!ALLOWED.includes(contentType)) {
-      return NextResponse.json({ error: "Unsupported file type" }, { status: 415 });
-    }
+    if (!filename || !contentType) return NextResponse.json({ error: "Missing filename or contentType" }, { status: 400 });
+    if (!ALLOWED.includes(contentType)) return NextResponse.json({ error: "Unsupported file type" }, { status: 415 });
 
     const emailFromStripe = await getEmailFromStripe(sessionId);
     const safeEmail = (emailFromStripe || email || "unknown").toLowerCase();
@@ -49,13 +44,7 @@ export async function POST(req: NextRequest) {
     });
 
     const uploadUrl = await getSignedUrl(s3, putCmd, { expiresIn: 15 * 60 });
-
-    return NextResponse.json({
-      uploadUrl,
-      key,
-      maxBytes: MAX_MB * 1024 * 1024,
-      allowed: ALLOWED,
-    });
+    return NextResponse.json({ uploadUrl, key, maxBytes: MAX_MB * 1024 * 1024, allowed: ALLOWED });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || "Failed to sign URL" }, { status: 500 });
   }
@@ -65,11 +54,9 @@ export async function GET(req: NextRequest) {
   try {
     const key = req.nextUrl.searchParams.get("key");
     if (!key) return NextResponse.json({ error: "Missing key" }, { status: 400 });
-
     const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
     const size = Number(head.ContentLength || 0);
-    const ok = size > 0 && size <= Number(process.env.UPLOAD_MAX_MB || "15") * 1024 * 1024;
-
+    const ok = size > 0 && size <= MAX_MB * 1024 * 1024;
     return NextResponse.json({ ok, size, contentType: head.ContentType || null });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Verify failed" }, { status: 400 });
