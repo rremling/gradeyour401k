@@ -49,7 +49,7 @@ async function sendMagicLink(formData: FormData) {
   return { ok: true };
 }
 
-// ✅ Fix: use the single-argument signature for a plain <form action={updatePrefs}>
+// ✅ Fixes applied here: single-arg signature, and redirect after revalidatePath
 async function updatePrefs(formData: FormData) {
   "use server";
   try {
@@ -60,14 +60,12 @@ async function updatePrefs(formData: FormData) {
     const provider = String(formData.get("provider") || "").trim();
     const profile = String(formData.get("profile") || "").trim();
 
-    // validate against allowed lists (prevents junk writes)
     const validProvider = PROVIDERS.includes(provider as (typeof PROVIDERS)[number]);
     const validProfile = PROFILES.includes(profile as (typeof PROFILES)[number]);
     if (!validProvider || !validProfile) {
       return { ok: false, error: "Invalid provider or profile." };
     }
 
-    // Update latest relevant order (prefer annual, else newest)
     const result: any = await query(
       `
       WITH target AS (
@@ -90,14 +88,11 @@ async function updatePrefs(formData: FormData) {
 
     const updated = Array.isArray(result?.rows) ? result.rows.length : (result?.rowCount ?? 0);
     if (!updated) {
-      // No existing order to attach prefs to — bail gracefully
-      // (Optionally you could insert a lightweight "prefs" row in a prefs table here.)
       return { ok: false, error: "No order found to update for this account." };
     }
 
-    // Refresh this page’s data after the mutation
     revalidatePath("/account");
-    return { ok: true };
+    redirect("/account?updated=1"); // ← force a fresh render so selects reflect new values
   } catch (e: any) {
     console.error("[account:updatePrefs] error:", e?.message || e);
     return { ok: false, error: "Could not save preferences. Please try again." };
@@ -293,6 +288,7 @@ export default async function AccountPage({
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Provider</label>
             <select
+              key={`provider-${provider}`} // ← remount with new defaults
               name="provider"
               defaultValue={provider || ""}
               className="w-full border rounded-lg px-3 py-2 bg-white"
@@ -312,6 +308,7 @@ export default async function AccountPage({
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Profile</label>
             <select
+              key={`profile-${profile}`} // ← remount with new defaults
               name="profile"
               defaultValue={profile || ""}
               className="w-full border rounded-lg px-3 py-2 bg-white"
