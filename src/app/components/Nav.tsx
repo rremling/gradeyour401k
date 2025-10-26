@@ -6,7 +6,10 @@ export default function Nav() {
     <header className="border-b bg-white">
       <nav className="mx-auto max-w-5xl px-4 py-3 flex items-center justify-between">
         {/* Brand / Logo */}
-        <Link href="/" className="text-xl font-semibold text-blue-700 hover:text-blue-900">
+        <Link
+          href="/"
+          className="text-xl font-semibold text-blue-700 hover:text-blue-900"
+        >
           GradeYour401k
         </Link>
 
@@ -15,11 +18,19 @@ export default function Nav() {
           <Link href="/pricing" className="hover:underline">
             Pricing
           </Link>
+
           <Link
             href="/grade/new"
             className="rounded-md border px-3 py-1.5 hover:bg-gray-50 transition"
           >
             Get Grade
+          </Link>
+
+          <Link
+            href="/account"
+            className="rounded-md bg-blue-600 text-white px-3 py-1.5 hover:bg-blue-700 transition"
+          >
+            Login
           </Link>
         </div>
       </nav>
