@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams, useRouter } from "next/navigation";
-import { useRef, useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const MAX_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB || "15");
 const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
@@ -13,7 +13,10 @@ export default function UploadClient() {
 
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [fileName, setFileName] = useState<string>("");
 
   const [status, setStatus] = useState<"idle"|"signing"|"uploading"|"verifying"|"done"|"error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -25,26 +28,38 @@ export default function UploadClient() {
     }
   }, [sessionId]);
 
+  function onPickClick() {
+    setError(null);
+    inputRef.current?.click();
+  }
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setError(null);
+    setInfo(null);
+    const f = e.target.files?.[0] || null;
+    setFile(f || null);
+    setFileName(f?.name || "");
+  }
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setInfo(null);
 
-    const file = fileRef.current?.files?.[0];
     if (!sessionId) return setError("Missing session ID. Please complete checkout again.");
-    if (!name.trim() || !email.trim() || !file) return setError("Please enter your name, email, and choose a file.");
+    if (!name.trim() || !email.trim()) return setError("Please enter your name and email.");
+    if (!file) return setError("Please choose a file.");
     if (!ALLOWED.has(file.type)) return setError("Only PDF, JPG, or PNG files are allowed.");
     if (file.size > MAX_MB * 1024 * 1024) return setError(`File is too large. Max ${MAX_MB} MB.`);
 
     try {
       setStatus("signing");
-      // Ask API for pre-signed PUT URL (note: server expects 'contentType', not 'type')
       const res = await fetch("/api/upload/s3-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           filename: file.name,
-          contentType: file.type,       // <— correct key
+          contentType: file.type,
           sessionId,
           email,
           name,
@@ -60,11 +75,17 @@ export default function UploadClient() {
       }
 
       setStatus("uploading");
-      // PUT directly to S3 — **no headers at all**
-      const put = await fetch(data.uploadUrl, {
+      // Try PUT with Content-Type first (common S3 requirement for signed URLs)
+      let put = await fetch(data.uploadUrl, {
         method: "PUT",
+        headers: { "Content-Type": file.type },
         body: file,
       });
+
+      // If the signature was created *without* Content-Type condition, retry without header
+      if (!put.ok && put.status === 403) {
+        put = await fetch(data.uploadUrl, { method: "PUT", body: file });
+      }
       if (!put.ok) throw new Error(`S3 upload failed (${put.status})`);
 
       setStatus("verifying");
@@ -76,11 +97,9 @@ export default function UploadClient() {
       router.push("/schedule");
     } catch (e: any) {
       setStatus("error");
-      setError(e.message || "Upload failed");
+      setError(e?.message || "Upload failed");
     }
   }
-
-  const chosen = fileRef.current?.files?.[0]?.name;
 
   return (
     <form onSubmit={handleUpload} className="space-y-4 bg-white p-5 rounded-2xl shadow">
@@ -114,24 +133,28 @@ export default function UploadClient() {
       <div className="grid gap-2">
         <label className="text-sm font-medium">Statement (PDF, JPG, or PNG)</label>
         <div className="flex items-center gap-3">
-          <label
-            htmlFor="file-upload"
+          <button
+            type="button"
+            onClick={onPickClick}
             className="cursor-pointer inline-block bg-[#0b59c7] text-white font-medium px-4 py-2 rounded-xl hover:bg-[#0a4fb5] transition shadow-md"
           >
             Choose File
-          </label>
+          </button>
           <span className="text-sm text-gray-700 truncate max-w-[60%]">
-            {chosen ? `Selected: ${chosen}` : "No file selected"}
+            {fileName ? `Selected: ${fileName}` : "No file selected"}
           </span>
         </div>
+
+        {/* Keep it visually hidden, not display:none, so mobile Safari stays happy */}
         <input
-          id="file-upload"
-          ref={fileRef}
+          ref={inputRef}
           type="file"
+          onChange={onFileChange}
           accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-          className="hidden"
-          required
+          className="sr-only"
+          tabIndex={-1}
         />
+
         <p className="text-xs text-gray-500">Allowed: PDF, JPG, PNG • Max size: {MAX_MB} MB</p>
       </div>
 
