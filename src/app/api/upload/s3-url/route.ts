@@ -1,4 +1,8 @@
+// src/app/api/upload/s3-url/route.ts
 import { NextRequest, NextResponse } from "next/server";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 import { S3Client, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import Stripe from "stripe";
@@ -11,9 +15,9 @@ const S3_BUCKET = process.env.S3_BUCKET!;
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY!;
 const UPLOAD_MAX_MB = Number(process.env.UPLOAD_MAX_MB || "15");
 
-// Upstash (rate limit + per-session counters)
-const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL!;
-const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN!;
+// Upstash (rate limit + per-session counters) — now OPTIONAL with fallback
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL || "";
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
 
 // default 3 uploads per Stripe Checkout session; change as needed
 const MAX_UPLOADS_PER_SESSION = Number(process.env.MAX_UPLOADS_PER_SESSION || "3");
@@ -25,17 +29,41 @@ const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const s3 = new S3Client({ region: AWS_REGION });
 const stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
 
-const redis = new Redis({ url: UPSTASH_URL, token: UPSTASH_TOKEN });
-const limiter = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(5, "10 m"), // 5 requests / 10 minutes
-});
+// Upstash or in-memory fallback so route still works without Redis
+let redis: Redis | { get: Function; incr: Function; expire: Function };
+let limiter: Ratelimit | { limit: (key: string) => Promise<{ success: boolean }> };
+
+if (UPSTASH_URL && UPSTASH_TOKEN) {
+  const real = new Redis({ url: UPSTASH_URL, token: UPSTASH_TOKEN });
+  redis = real as unknown as Redis;
+  limiter = new Ratelimit({ redis: real, limiter: Ratelimit.slidingWindow(5, "10 m") });
+} else {
+  console.warn("[s3-url] Upstash not configured; using in-memory counters (non-persistent).");
+  const counters = new Map<string, number>();
+  redis = {
+    async get<T>(k: string) {
+      return (counters.get(k) as any as T) ?? null;
+    },
+    async incr(k: string) {
+      counters.set(k, (counters.get(k) ?? 0) + 1);
+    },
+    async expire(_k: string, _sec: number) {
+      /* no-op */
+    },
+  } as any;
+  limiter = {
+    async limit(_key: string) {
+      return { success: true };
+    },
+  } as any;
+}
 
 // -------- Helpers -----------------------------------------------------------
 function ipFrom(req: NextRequest): string {
   return (
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.ip ||
+    // @ts-ignore - NextRequest may not expose ip in all runtimes
+    (req as any).ip ||
     "unknown"
   );
 }
@@ -63,7 +91,7 @@ async function verifyStripeSession(sessionId: string) {
 // -------- POST: sign a PUT URL ---------------------------------------------
 export async function POST(req: NextRequest) {
   try {
-    // Basic rate limit by IP before any heavy work
+    // Rate limit by IP (cheap)
     const ip = ipFrom(req);
     const rate = await limiter.limit(`presign:${ip}`);
     if (!rate.success) {
@@ -74,7 +102,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({} as any));
-    const { filename, contentType, sessionId, email: emailFromClient, name, purpose } = body || {};
+    const {
+      filename,
+      contentType, // required from client
+      sessionId,   // required (from success_url ?session_id=...)
+      email: emailFromClient,
+      name,
+      purpose,
+    } = body || {};
 
     if (!filename || !contentType) {
       return NextResponse.json(
@@ -106,9 +141,8 @@ export async function POST(req: NextRequest) {
     const email = (emailFromClient || v.email || "unknown").toLowerCase();
 
     // Per-session upload cap (allows resend/additional docs up to MAX)
-    // NOTE: We count at presign time; you can reset via Redis if needed.
     const countKey = `uploads:count:${sessionId}`;
-    const used = (await redis.get<number>(countKey)) || 0;
+    const used = (await (redis as any).get<number>(countKey)) || 0;
     if (used >= MAX_UPLOADS_PER_SESSION) {
       return NextResponse.json(
         {
@@ -126,28 +160,29 @@ export async function POST(req: NextRequest) {
       .toString(36)
       .slice(2, 8)}-${safeName(filename)}`;
 
-    // Sign a short-lived PUT URL (no SSE header here; rely on bucket default encryption)
+    // Minimal presign — no headers bound to signature
     const putCmd = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
+      // Intentionally NO ContentType/ACL/Metadata here to avoid header mismatch
     });
     const uploadUrl = await getSignedUrl(s3, putCmd, { expiresIn: 15 * 60 });
 
-    // Increment the per-session counter AFTER signing to throttle abuse
-    // (If you prefer to increment only after verify step below, move this.)
-    await redis.incr(countKey);
-    // Optional: expire the counter after N days so repeat customers can upload again later
-    await redis.expire(countKey, 60 * 60 * 24 * 30); // 30 days
+    // Increment per-session counter (throttles abuse)
+    await (redis as any).incr(countKey);
+    await (redis as any).expire(countKey, 60 * 60 * 24 * 30); // 30 days
 
     return NextResponse.json({
       uploadUrl,
       key,
       maxBytes: UPLOAD_MAX_MB * 1024 * 1024,
       allowed: Array.from(ALLOWED),
-      remaining:
-        Math.max(0, MAX_UPLOADS_PER_SESSION - (used + 1)),
+      remaining: Math.max(0, MAX_UPLOADS_PER_SESSION - (used + 1)),
+      // Echo back a tiny bit of context (handy for logs/debug)
+      context: { sessionId, email, purpose: purpose || "upload" },
     });
   } catch (e: any) {
+    console.error("[s3-url POST] error:", e?.message || e);
     return NextResponse.json(
       { error: e?.message || "Failed to sign URL" },
       { status: 500 }
@@ -162,17 +197,17 @@ export async function GET(req: NextRequest) {
     if (!key) {
       return NextResponse.json({ error: "Missing key" }, { status: 400 });
     }
-    const head = await s3.send(
-      new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key })
-    );
+    const head = await s3.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }));
     const size = Number(head.ContentLength || 0);
     const ok = size > 0 && size <= UPLOAD_MAX_MB * 1024 * 1024;
     return NextResponse.json({
       ok,
       size,
       contentType: head.ContentType || null,
+      etag: head.ETag || null,
     });
   } catch (e: any) {
+    console.error("[s3-url GET] error:", e?.message || e);
     return NextResponse.json(
       { ok: false, error: e?.message || "Verify failed" },
       { status: 400 }
