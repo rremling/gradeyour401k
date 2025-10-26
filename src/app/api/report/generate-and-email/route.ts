@@ -165,15 +165,13 @@ export async function GET(req: NextRequest) {
       preview: {
         provider: preview.provider_display || preview.provider,
         profile: preview.profile,
-        // REPLACE the existing "grade:" block with this:
-grade: (() => {
-  const toNum = (v: any) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  return toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
-})(),
-
+        grade: (() => {
+          const toNum = (v: any) => {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : null;
+          };
+          return toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
+        })(),
         rowsCount: parseRows(preview.rows).length,
       },
     });
@@ -220,22 +218,21 @@ export async function POST(req: NextRequest) {
     }
 
     const rows = parseRows(preview.rows);
-
-const toNum = (v: any) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
-const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
+    const toNum = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
 
     const pdfBytes = await generatePdfBuffer({
-  provider: preview.provider_display || preview.provider || "",
-  profile: preview.profile || "",
-  grade, // number | null is OK; the generator will format it
-  holdings: rows, // NOTE: renamed from rows -> holdings
-  logoUrl: "https://i.imgur.com/DMCbj99.png",
-  clientName: preview.profile || undefined,
-  reportDate: preview.created_at || undefined,
-});
+      provider: preview.provider_display || preview.provider || "",
+      profile: preview.profile || "",
+      grade,
+      holdings: rows,
+      logoUrl: "https://i.imgur.com/DMCbj99.png",
+      clientName: preview.profile || undefined,
+      reportDate: preview.created_at || undefined,
+    });
 
     await sendEmailViaResend({
       to: toEmail,
@@ -247,7 +244,6 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
   </div>
 
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:640px;margin:0 auto;line-height:1.55;color:#111;">
-    <!-- Header with logo (table for email compatibility) -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:12px 0 16px 0;">
       <tr>
         <td align="left" style="padding:0;">
@@ -262,7 +258,7 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
     </table>
 
     <h2 style="margin:0 0 8px 0;">Your GradeYour401k Report</h2>
-      <p style="margin:0 0 16px 0;">Your personalized 401(k) report is attached as a PDF.</p>
+    <p style="margin:0 0 16px 0;">Your personalized 401(k) report is attached as a PDF.</p>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px 0;">
       <tr>
@@ -284,17 +280,16 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
       <li style="margin:6px 0;">Log in to your 401(k) plan.</li>
       <li style="margin:6px 0;">Update your allocations to align with your <em>Investor Profile</em> and our <em>Market Profile</em> guidance in the attached report.</li>
       <li style="margin:6px 0;">Save/confirm your changes inside the plan.</li>
-      <!-- Updated CTA line below -->
       <li style="margin:6px 0;">
         <strong>Ready for a pro’s second opinion?</strong><br />
-        Schedule a <strong>30-Minute 401(k) Review Call</strong> with Roger Remling, CFP®. We’ll confirm your updates, uncover hidden inefficiencies, and ensure your portfolio’s flight path is on course.
+        Schedule a <strong>30-Minute 401(k) Review Call</strong> with Roger Remling, Tax & Financial Advisor. We’ll confirm your updates, uncover hidden inefficiencies, and ensure your portfolio’s flight path is on course.
       </li>
     </ol>
 
-    <!-- Updated CTA button -->
+    <!-- Blue CTA button -->
     <div style="margin:20px 0 10px;">
       <a href="https://gradeyour401k.com/review"
-         style="display:inline-block;padding:12px 18px;background:#111111;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;">
+         style="display:inline-block;padding:12px 18px;background:#0b59c7;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;">
         Book Your 401(k) Review Call — $149
       </a>
     </div>
@@ -316,9 +311,7 @@ const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
     </p>
   </div>
 `,
-
-     attachments: [{ filename: "GradeYour401k.pdf", content: Buffer.from(pdfBytes) }],
-
+      attachments: [{ filename: "GradeYour401k.pdf", content: Buffer.from(pdfBytes) }],
     });
 
     return NextResponse.json({ ok: true, emailed: toEmail, previewId });
