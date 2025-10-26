@@ -52,8 +52,12 @@ export default function UploadClient() {
           name: name || undefined,
         }),
       });
+
+      // Expect { uploadUrl, key } — not { url, fields }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to get upload URL");
+      if (!res.ok || !data?.uploadUrl || !data?.key) {
+        throw new Error(data?.error || "Failed to get upload URL");
+      }
       const { uploadUrl, key } = data as { uploadUrl: string; key: string };
 
       setStatus("uploading");
@@ -71,15 +75,12 @@ export default function UploadClient() {
       });
 
       setStatus("verifying");
-      // Optional verification (HEAD) on our API
+      // Optional verification via our API
       const verify = await fetch(`/api/upload/s3-url?key=${encodeURIComponent(key)}`);
       const v = await verify.json();
-      if (!verify.ok || !v.ok) {
-        throw new Error(v?.error || "Upload verification failed");
-      }
+      if (!verify.ok || !v.ok) throw new Error(v?.error || "Upload verification failed");
 
       setStatus("done");
-      // Continue to scheduling page on success
       router.push("/schedule");
     } catch (err: any) {
       setStatus("error");
