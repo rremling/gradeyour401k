@@ -121,12 +121,13 @@ async function updatePrefs(formData: FormData) {
       return { ok: false, error: "Invalid selection in details." };
     }
 
+    // ✅ cleaned-up parameter list and query placeholders
     const result: any = await query(
       `
       WITH target AS (
         SELECT id
           FROM public.orders
-         WHERE email = $11
+         WHERE email = $9
          ORDER BY (plan_key = 'annual') DESC, created_at DESC
          LIMIT 1
       )
@@ -145,16 +146,15 @@ async function updatePrefs(formData: FormData) {
       RETURNING o.id
       `,
       [
-        provider,
-        profile,
+        provider,                // $1
+        profile,                 // $2
         planned_retirement_year, // $3
         employer,                // $4
         income_band,             // $5
         state,                   // $6
         comms_pref,              // $7
         client_notes,            // $8
-        null, null,
-        claims.email             // $11
+        claims.email             // $9
       ]
     );
 
@@ -163,7 +163,7 @@ async function updatePrefs(formData: FormData) {
       return { ok: false, error: "No order found to update for this account." };
     }
 
-    // Flash cookie so the page can show "Saved!" (Updated!) and persist field selections
+    // Flash cookie for "Saved!"
     const c = cookies();
     c.set("account_updated", "1", {
       path: "/account",
@@ -173,13 +173,13 @@ async function updatePrefs(formData: FormData) {
     });
 
     revalidatePath("/account");
-    // IMPORTANT: add query param so banner always shows, and ensure a fresh SSR read so fields persist
     redirect("/account?updated=1");
   } catch (e: any) {
     console.error("[account:updatePrefs] error:", e?.message || e);
     return { ok: false, error: "Could not save preferences. Please try again." };
   }
 }
+
 
 async function createPortalAction() {
   "use server";
