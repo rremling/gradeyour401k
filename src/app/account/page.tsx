@@ -89,15 +89,20 @@ async function updatePrefs(formData: FormData) {
   const validProvider = PROVIDERS.includes(provider as (typeof PROVIDERS)[number]);
   const validProfile = PROFILES.includes(profile as (typeof PROFILES)[number]);
   if (!validProvider || !validProfile) {
-    return { ok: false, error: "Invalid provider or profile." };
+    redirect("/account?error=invalid_prefs");
   }
 
-  // NEW: contact fields (optional)
+  // contact fields
   const full_name = (String(formData.get("full_name") || "").trim() || null) as string | null;
-  let phone = (String(formData.get("phone") || "").trim() || null) as string | null;
-  if (phone && phone.length > 30) {
-    return { ok: false, error: "Phone looks too long." };
+  const phoneRaw = String(formData.get("phone") || "").trim();
+  const phonePattern = /^\d{3}-\d{3}-\d{4}$/;
+
+  // Require phone and must match xxx-xxx-xxxx
+  if (!phonePattern.test(phoneRaw)) {
+    // Bounce back with a phone error flag
+    redirect("/account?phone=invalid");
   }
+  const phone = phoneRaw as string; // safe now
 
   // CRM-ish fields
   const plannedYearRaw = String(formData.get("planned_retirement_year") || "").trim();
@@ -113,7 +118,7 @@ async function updatePrefs(formData: FormData) {
     const n = Number(plannedYearRaw);
     const thisYear = new Date().getFullYear();
     if (!Number.isInteger(n) || n < thisYear || n > thisYear + 60) {
-      return { ok: false, error: "Please enter a valid planned retirement year." };
+      redirect("/account?error=bad_year");
     }
     planned_retirement_year = n;
   }
@@ -123,11 +128,11 @@ async function updatePrefs(formData: FormData) {
   const stateOk = !state || US_STATES.includes(state as (typeof US_STATES)[number]);
   const commsOk = !comms_pref || COMMS_PREFS.includes(comms_pref as (typeof COMMS_PREFS)[number]);
   if (!incomeOk || !stateOk || !commsOk) {
-    return { ok: false, error: "Invalid selection in details." };
+    redirect("/account?error=bad_detail");
   }
 
   try {
-    // NOTE: added full_name ($9) and phone ($10); email shifts to $11
+    // added full_name ($9) and phone ($10); email is $11
     const result: any = await query(
       `
       WITH target AS (
@@ -162,15 +167,15 @@ async function updatePrefs(formData: FormData) {
         state,                   // $6
         comms_pref,              // $7
         client_notes,            // $8
-        full_name,               // $9  (NEW)
-        phone,                   // $10 (NEW)
+        full_name,               // $9
+        phone,                   // $10
         claims.email             // $11
       ]
     );
 
     const updated = Array.isArray(result?.rows) ? result.rows.length : (result?.rowCount ?? 0);
     if (!updated) {
-      return { ok: false, error: "No order found to update for this account." };
+      redirect("/account?error=not_found");
     }
 
     // Flash cookie for "Saved!"
@@ -185,7 +190,7 @@ async function updatePrefs(formData: FormData) {
   } catch (e: any) {
     if (e?.digest === "NEXT_REDIRECT") throw e;
     console.error("[account:updatePrefs] error:", e?.message || e);
-    return { ok: false, error: "Could not save preferences. Please try again." };
+    redirect("/account?error=save_fail");
   }
 
   revalidatePath("/account");
@@ -331,7 +336,12 @@ async function getContext() {
 export default async function AccountPage({
   searchParams = {},
 }: {
-  searchParams?: { error?: string; updated?: string; magic?: "sent" | "notfound" | "invalid" | "sendfail" };
+  searchParams?: {
+    error?: string;
+    updated?: string;
+    magic?: "sent" | "notfound" | "invalid" | "sendfail";
+    phone?: "invalid";
+  };
 }) {
   const {
     email, reports, provider, profile,
@@ -346,6 +356,9 @@ export default async function AccountPage({
 
   const cookieUpdated = cookies().get("account_updated")?.value === "1";
   const justUpdated = searchParams?.updated === "1" || cookieUpdated;
+
+  // Field-specific error flags
+  const phoneInvalid = searchParams?.phone === "invalid";
 
   if (!email) {
     return (
@@ -511,7 +524,7 @@ export default async function AccountPage({
             </select>
           </div>
 
-          {/* NEW: Full Name */}
+          {/* Full Name */}
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Full Name</label>
             <input
@@ -524,17 +537,30 @@ export default async function AccountPage({
             />
           </div>
 
-          {/* NEW: Phone */}
+          {/* Phone (required, strict pattern) */}
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Phone</label>
             <input
               type="tel"
               name="phone"
-              placeholder="(555) 555-5555"
+              placeholder="123-456-7890"
               defaultValue={phone || ""}
-              className="w-full border rounded-lg px-3 py-2"
-              maxLength={30}
+              className={[
+                "w-full border rounded-lg px-3 py-2",
+                phoneInvalid ? "border-red-500 ring-1 ring-red-300" : ""
+              ].join(" ")}
+              required
+              // exact xxx-xxx-xxxx pattern
+              pattern="^\d{3}-\d{3}-\d{4}$"
+              title="Enter phone as 123-456-7890"
+              inputMode="numeric"
+              maxLength={12}
             />
+            {phoneInvalid && (
+              <p className="mt-1 text-sm text-red-600">
+                Please enter your phone as <strong>123-456-7890</strong> and try again.
+              </p>
+            )}
           </div>
 
           {/* Comms pref */}
