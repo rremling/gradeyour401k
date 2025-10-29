@@ -27,7 +27,6 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "
 const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
 const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 
-// Advisor review booking target (adjust if you have a dedicated page)
 const ADVISOR_REVIEW_URL = "/pricing";
 
 const US_STATES = [
@@ -64,7 +63,6 @@ async function sendMagicLink(formData: FormData) {
     redirect("/account?magic=notfound");
   }
 
-  // Send magic link
   const base = process.env.NEXT_PUBLIC_BASE_URL || "";
   const res = await fetch(`${base}/api/account/magic-link`, {
     method: "POST",
@@ -80,48 +78,49 @@ async function sendMagicLink(formData: FormData) {
 
 async function updatePrefs(formData: FormData) {
   "use server";
+
+  const token = safeCookie("acct");
+  const claims = await verifyAccountToken(token);
+  if (!claims) return { ok: false, error: "Unauthorized" };
+
+  // core prefs
+  const provider = String(formData.get("provider") || "").trim();
+  const profile = String(formData.get("profile") || "").trim();
+  const validProvider = PROVIDERS.includes(provider as (typeof PROVIDERS)[number]);
+  const validProfile = PROFILES.includes(profile as (typeof PROFILES)[number]);
+  if (!validProvider || !validProfile) {
+    return { ok: false, error: "Invalid provider or profile." };
+  }
+
+  // CRM-ish fields
+  const plannedYearRaw = String(formData.get("planned_retirement_year") || "").trim();
+  const employer = String(formData.get("employer") || "").trim() || null;
+  const income_band = String(formData.get("income_band") || "").trim() || null;
+  const state = String(formData.get("state") || "").trim() || null;
+  const comms_pref = String(formData.get("comms_pref") || "").trim() || null;
+  const client_notes = String(formData.get("client_notes") || "").trim() || null;
+
+  // planned retirement year validation (optional)
+  let planned_retirement_year: number | null = null;
+  if (plannedYearRaw) {
+    const n = Number(plannedYearRaw);
+    const thisYear = new Date().getFullYear();
+    if (!Number.isInteger(n) || n < thisYear || n > thisYear + 60) {
+      return { ok: false, error: "Please enter a valid planned retirement year." };
+    }
+    planned_retirement_year = n;
+  }
+
+  // normalize enums if provided
+  const incomeOk = !income_band || INCOME_BANDS.includes(income_band as (typeof INCOME_BANDS)[number]);
+  const stateOk = !state || US_STATES.includes(state as (typeof US_STATES)[number]);
+  const commsOk = !comms_pref || COMMS_PREFS.includes(comms_pref as (typeof COMMS_PREFS)[number]);
+  if (!incomeOk || !stateOk || !commsOk) {
+    return { ok: false, error: "Invalid selection in details." };
+  }
+
   try {
-    const token = safeCookie("acct");
-    const claims = await verifyAccountToken(token);
-    if (!claims) return { ok: false, error: "Unauthorized" };
-
-    // core prefs
-    const provider = String(formData.get("provider") || "").trim();
-    const profile = String(formData.get("profile") || "").trim();
-    const validProvider = PROVIDERS.includes(provider as (typeof PROVIDERS)[number]);
-    const validProfile = PROFILES.includes(profile as (typeof PROFILES)[number]);
-    if (!validProvider || !validProfile) {
-      return { ok: false, error: "Invalid provider or profile." };
-    }
-
-    // CRM-ish fields
-    const plannedYearRaw = String(formData.get("planned_retirement_year") || "").trim();
-    const employer = String(formData.get("employer") || "").trim() || null;
-    const income_band = String(formData.get("income_band") || "").trim() || null;
-    const state = String(formData.get("state") || "").trim() || null;
-    const comms_pref = String(formData.get("comms_pref") || "").trim() || null;
-    const client_notes = String(formData.get("client_notes") || "").trim() || null;
-
-    // planned retirement year validation (optional)
-    let planned_retirement_year: number | null = null;
-    if (plannedYearRaw) {
-      const n = Number(plannedYearRaw);
-      const thisYear = new Date().getFullYear();
-      if (!Number.isInteger(n) || n < thisYear || n > thisYear + 60) {
-        return { ok: false, error: "Please enter a valid planned retirement year." };
-      }
-      planned_retirement_year = n;
-    }
-
-    // normalize enums if provided
-    const incomeOk = !income_band || INCOME_BANDS.includes(income_band as (typeof INCOME_BANDS)[number]);
-    const stateOk = !state || US_STATES.includes(state as (typeof US_STATES)[number]);
-    const commsOk = !comms_pref || COMMS_PREFS.includes(comms_pref as (typeof COMMS_PREFS)[number]);
-    if (!incomeOk || !stateOk || !commsOk) {
-      return { ok: false, error: "Invalid selection in details." };
-    }
-
-    // ✅ cleaned-up parameter list and query placeholders
+    // NOTE: cleaned placeholders ($1..$9)
     const result: any = await query(
       `
       WITH target AS (
@@ -172,14 +171,19 @@ async function updatePrefs(formData: FormData) {
       maxAge: 60,
     });
 
-    revalidatePath("/account");
-    redirect("/account?updated=1");
   } catch (e: any) {
+    // If Next's redirect gets thrown, rethrow it so it's not logged as an error.
+    if (e?.digest === "NEXT_REDIRECT") {
+      throw e;
+    }
     console.error("[account:updatePrefs] error:", e?.message || e);
     return { ok: false, error: "Could not save preferences. Please try again." };
   }
-}
 
+  // Ensure fresh SSR read & show Saved! near button
+  revalidatePath("/account");
+  redirect("/account?updated=1");
+}
 
 async function createPortalAction() {
   "use server";
@@ -327,7 +331,7 @@ export default async function AccountPage({
   const errorMsg = searchParams?.error || "";
   const magicStatus = searchParams?.magic;
 
-  // Show "Saved!" if query param OR flash cookie exists
+  // Check for "Saved!" (moved next to the Save button below)
   const cookieUpdated = cookies().get("account_updated")?.value === "1";
   const justUpdated = searchParams?.updated === "1" || cookieUpdated;
 
@@ -382,17 +386,6 @@ export default async function AccountPage({
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
-      {/* Saved banner */}
-      {justUpdated && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="border border-green-200 bg-green-50 text-green-800 rounded-md px-3 py-2"
-        >
-          Saved!
-        </div>
-      )}
-
       {errorMsg ? (
         <div className="border border-red-300 bg-red-50 text-red-800 rounded-md px-3 py-2">
           {errorMsg}
@@ -533,14 +526,24 @@ export default async function AccountPage({
             />
           </div>
 
-          {/* Save */}
-          <div className="sm:col-span-3">
+          {/* Save + inline Saved! banner */}
+          <div className="sm:col-span-3 flex items-center gap-3">
             <button
               type="submit"
-              className="w-full sm:w-auto inline-flex items-center justify-center rounded-lg px-4 py-2 bg-sky-600 text-white font-semibold"
+              className="inline-flex items-center justify-center rounded-lg px-4 py-2 bg-sky-600 text-white font-semibold"
             >
               Save
             </button>
+            {justUpdated && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="inline-flex items-center gap-2 rounded-md bg-green-50 text-green-800 border border-green-200 px-2.5 py-1 text-sm"
+              >
+                <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                Saved!
+              </div>
+            )}
           </div>
         </form>
       </section>
@@ -594,7 +597,7 @@ export default async function AccountPage({
         ) : (
           <ul className="space-y-2">
             {reports
-              .filter((r: any) => !!r.preview_id) // <-- only keep items with generated PDFs
+              .filter((r: any) => !!r.preview_id)
               .map((r: any) => {
                 const ts = r.preview_created_at || r.order_created_at;
                 const label = `Preview ${String(r.preview_id).slice(0, 8)}`;
