@@ -24,64 +24,69 @@ export async function GET(req: Request) {
       ? Math.min(Math.max(limitRaw, 1), 1000)
       : 200;
 
-    // Use window function to pick the most recent row per email
-    // Priority: annual plan first, then most recent created_at
-    // Cast last_advisor_review_at to date for easy <input type="date" /> binding
     const rows: any[] = q
       ? await sql/*sql*/`
         WITH ranked AS (
           SELECT
-            email,
-            provider,
-            profile,
-            planned_retirement_year,
-            employer,
-            income_band,
-            state,
-            comms_pref,
-            (last_advisor_review_at::date) AS last_advisor_review_at,
-            client_notes,
-            plan_key,
-            created_at,
+            o.email,
+            o.provider,
+            o.profile,
+            o.planned_retirement_year,
+            o.employer,
+            o.income_band,
+            o.state,
+            o.comms_pref,
+            (o.last_advisor_review_at::date) AS last_advisor_review_at,
+            o.client_notes,
+            o.plan_key,
+            o.created_at,
+            o.stripe_customer_id,
+            p.id::text AS latest_preview_id,
+            p.created_at AS latest_preview_created_at,
             ROW_NUMBER() OVER (
-              PARTITION BY email
-              ORDER BY (plan_key = 'annual') DESC, created_at DESC
+              PARTITION BY o.email
+              ORDER BY (o.plan_key = 'annual') DESC, o.created_at DESC
             ) AS rn
-          FROM public.orders
-          WHERE email ILIKE ${"%" + q + "%"}
+          FROM public.orders o
+          LEFT JOIN public.previews p ON p.id = o.preview_id
+          WHERE o.email ILIKE ${"%" + q + "%"}
         )
         SELECT *
         FROM ranked
         WHERE rn = 1
         ORDER BY email ASC
-        LIMIT ${limit}
+        LIMIT ${limit};
       `
       : await sql/*sql*/`
         WITH ranked AS (
           SELECT
-            email,
-            provider,
-            profile,
-            planned_retirement_year,
-            employer,
-            income_band,
-            state,
-            comms_pref,
-            (last_advisor_review_at::date) AS last_advisor_review_at,
-            client_notes,
-            plan_key,
-            created_at,
+            o.email,
+            o.provider,
+            o.profile,
+            o.planned_retirement_year,
+            o.employer,
+            o.income_band,
+            o.state,
+            o.comms_pref,
+            (o.last_advisor_review_at::date) AS last_advisor_review_at,
+            o.client_notes,
+            o.plan_key,
+            o.created_at,
+            o.stripe_customer_id,
+            p.id::text AS latest_preview_id,
+            p.created_at AS latest_preview_created_at,
             ROW_NUMBER() OVER (
-              PARTITION BY email
-              ORDER BY (plan_key = 'annual') DESC, created_at DESC
+              PARTITION BY o.email
+              ORDER BY (o.plan_key = 'annual') DESC, o.created_at DESC
             ) AS rn
-          FROM public.orders
+          FROM public.orders o
+          LEFT JOIN public.previews p ON p.id = o.preview_id
         )
         SELECT *
         FROM ranked
         WHERE rn = 1
         ORDER BY email ASC
-        LIMIT ${limit}
+        LIMIT ${limit};
       `;
 
     const clients = rows.map((r) => ({
@@ -93,8 +98,11 @@ export async function GET(req: Request) {
       income_band: r.income_band ?? null,
       state: r.state ?? null,
       comms_pref: r.comms_pref ?? null,
-      last_advisor_review_at: r.last_advisor_review_at ?? null, // YYYY-MM-DD from ::date
+      last_advisor_review_at: r.last_advisor_review_at ?? null,
       client_notes: r.client_notes ?? null,
+      stripe_customer_id: r.stripe_customer_id ?? null,
+      latest_preview_id: r.latest_preview_id ?? null,
+      latest_preview_created_at: r.latest_preview_created_at ?? null,
     }));
 
     return NextResponse.json({ clients });
