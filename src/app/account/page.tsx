@@ -27,6 +27,22 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "
 const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
 const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 
+// Advisor review booking target (adjust if you have a dedicated page)
+const ADVISOR_REVIEW_URL = "/pricing";
+
+// States (short list — expand if you like)
+const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID","IL","IN","KS","KY",
+  "LA","MA","MD","ME","MI","MN","MO","MS","MT","NC","ND","NE","NH","NJ","NM","NV","NY","OH",
+  "OK","OR","PA","RI","SC","SD","TN","TX","UT","VA","VT","WA","WI","WV","WY",
+] as const;
+
+const INCOME_BANDS = [
+  "<75k", "75-150k", "150-300k", "300-600k", "600k+"
+] as const;
+
+const COMMS_PREFS = ["email", "phone_email"] as const;
+
 /* ───────────────────── Server Actions ───────────────────── */
 
 async function sendMagicLink(formData: FormData) {
@@ -36,7 +52,7 @@ async function sendMagicLink(formData: FormData) {
     redirect("/account?magic=invalid");
   }
 
-  // 1) Check if we have an account for this email
+  // Check if an account exists for this email
   const r: any = await query(
     `
       SELECT 1
@@ -47,16 +63,12 @@ async function sendMagicLink(formData: FormData) {
     `,
     [email]
   );
-
-  const hasAccount =
-    Array.isArray(r?.rows) ? r.rows.length > 0 : (Array.isArray(r) ? r.length > 0 : false);
-
-  // 2) If no account, DO NOT send email; show "not found" message
+  const hasAccount = Array.isArray(r?.rows) ? r.rows.length > 0 : (Array.isArray(r) ? r.length > 0 : false);
   if (!hasAccount) {
     redirect("/account?magic=notfound");
   }
 
-  // 3) If account exists, send the magic link
+  // Send magic link
   const base = process.env.NEXT_PUBLIC_BASE_URL || "";
   const res = await fetch(`${base}/api/account/magic-link`, {
     method: "POST",
@@ -64,13 +76,9 @@ async function sendMagicLink(formData: FormData) {
     body: JSON.stringify({ email }),
     cache: "no-store",
   });
-
   if (!res.ok) {
-    // route returned an error; surface a generic failure
     redirect("/account?magic=sendfail");
   }
-
-  // 4) Success banner
   redirect("/account?magic=sent");
 }
 
@@ -81,13 +89,40 @@ async function updatePrefs(formData: FormData) {
     const claims = await verifyAccountToken(token);
     if (!claims) return { ok: false, error: "Unauthorized" };
 
+    // core prefs
     const provider = String(formData.get("provider") || "").trim();
     const profile = String(formData.get("profile") || "").trim();
-
     const validProvider = PROVIDERS.includes(provider as (typeof PROVIDERS)[number]);
     const validProfile = PROFILES.includes(profile as (typeof PROFILES)[number]);
     if (!validProvider || !validProfile) {
       return { ok: false, error: "Invalid provider or profile." };
+    }
+
+    // CRM-ish fields
+    const plannedYearRaw = String(formData.get("planned_retirement_year") || "").trim();
+    const employer = String(formData.get("employer") || "").trim() || null;
+    const income_band = String(formData.get("income_band") || "").trim() || null;
+    const state = String(formData.get("state") || "").trim() || null;
+    const comms_pref = String(formData.get("comms_pref") || "").trim() || null;
+    const client_notes = String(formData.get("client_notes") || "").trim() || null;
+
+    // planned retirement year validation (optional)
+    let planned_retirement_year: number | null = null;
+    if (plannedYearRaw) {
+      const n = Number(plannedYearRaw);
+      const thisYear = new Date().getFullYear();
+      if (!Number.isInteger(n) || n < thisYear || n > thisYear + 60) {
+        return { ok: false, error: "Please enter a valid planned retirement year." };
+      }
+      planned_retirement_year = n;
+    }
+
+    // normalize enums if provided
+    const incomeOk = !income_band || INCOME_BANDS.includes(income_band as (typeof INCOME_BANDS)[number]);
+    const stateOk = !state || US_STATES.includes(state as (typeof US_STATES)[number]);
+    const commsOk = !comms_pref || COMMS_PREFS.includes(comms_pref as (typeof COMMS_PREFS)[number]);
+    if (!incomeOk || !stateOk || !commsOk) {
+      return { ok: false, error: "Invalid selection in details." };
     }
 
     const result: any = await query(
@@ -95,19 +130,37 @@ async function updatePrefs(formData: FormData) {
       WITH target AS (
         SELECT id
           FROM public.orders
-         WHERE email = $3
+         WHERE email = $11
          ORDER BY (plan_key = 'annual') DESC, created_at DESC
          LIMIT 1
       )
       UPDATE public.orders o
          SET provider = $1,
              profile  = $2,
+             planned_retirement_year = $3,
+             employer = $4,
+             income_band = $5,
+             state = $6,
+             comms_pref = $7,
+             client_notes = $8,
              updated_at = NOW()
         FROM target
        WHERE o.id = target.id
       RETURNING o.id
       `,
-      [provider, profile, claims.email]
+      [
+        provider,
+        profile,
+        planned_retirement_year, // $3
+        employer,                // $4
+        income_band,             // $5
+        state,                   // $6
+        comms_pref,              // $7
+        client_notes,            // $8
+        // $9-$10 unused (kept for clarity), $11 email:
+        null, null,
+        claims.email             // $11
+      ]
     );
 
     const updated = Array.isArray(result?.rows) ? result.rows.length : (result?.rowCount ?? 0);
@@ -115,7 +168,7 @@ async function updatePrefs(formData: FormData) {
       return { ok: false, error: "No order found to update for this account." };
     }
 
-    // Flash cookie for "Updated!"
+    // Flash cookie so the page can show "Updated!"
     const c = cookies();
     c.set("account_updated", "1", {
       path: "/account",
@@ -200,7 +253,12 @@ async function logoutAction() {
 async function getContext() {
   const token = safeCookie("acct");
   const claims = await verifyAccountToken(token);
-  if (!claims) return { email: null, reports: [] as any[], provider: "", profile: "" };
+  if (!claims) return {
+    email: null, reports: [] as any[], provider: "", profile: "",
+    last_advisor_review_at: null as Date | string | null,
+    planned_retirement_year: null as number | null,
+    employer: "", income_band: "", state: "", comms_pref: "", client_notes: ""
+  };
 
   const email = claims.email;
 
@@ -222,7 +280,14 @@ async function getContext() {
   const reports = Array.isArray(rReports?.rows) ? rReports.rows : (Array.isArray(rReports) ? rReports : []);
 
   const rPrefs: any = await query(
-    `SELECT provider, profile
+    `SELECT provider, profile,
+            last_advisor_review_at,
+            planned_retirement_year,
+            employer,
+            income_band,
+            state,
+            comms_pref,
+            client_notes
        FROM public.orders
       WHERE email = $1
       ORDER BY (plan_key = 'annual') DESC, created_at DESC
@@ -230,10 +295,23 @@ async function getContext() {
     [email]
   );
   const prefsRows = Array.isArray(rPrefs?.rows) ? rPrefs.rows : (Array.isArray(rPrefs) ? rPrefs : []);
-  const provider = prefsRows[0]?.provider || "";
-  const profile = prefsRows[0]?.profile || "";
+  const pref = prefsRows[0] || {};
+  const provider = pref.provider || "";
+  const profile = pref.profile || "";
 
-  return { email, reports, provider, profile };
+  return {
+    email,
+    reports,
+    provider,
+    profile,
+    last_advisor_review_at: pref.last_advisor_review_at || null,
+    planned_retirement_year: pref.planned_retirement_year ?? null,
+    employer: pref.employer || "",
+    income_band: pref.income_band || "",
+    state: pref.state || "",
+    comms_pref: pref.comms_pref || "",
+    client_notes: pref.client_notes || "",
+  };
 }
 
 /* ───────────────────── Page Component ───────────────────── */
@@ -243,7 +321,13 @@ export default async function AccountPage({
 }: {
   searchParams?: { error?: string; updated?: string; magic?: "sent" | "notfound" | "invalid" | "sendfail" };
 }) {
-  const { email, reports, provider, profile } = await getContext();
+  const {
+    email, reports, provider, profile,
+    last_advisor_review_at,
+    planned_retirement_year,
+    employer, income_band, state, comms_pref, client_notes
+  } = await getContext();
+
   const errorMsg = searchParams?.error || "";
   const magicStatus = searchParams?.magic;
 
@@ -320,8 +404,9 @@ export default async function AccountPage({
         </form>
       </section>
 
+      {/* Provider & Profile + Details (single form) */}
       <section>
-        <h2 className="text-xl font-semibold mb-1">Provider & Profile</h2>
+        <h2 className="text-xl font-semibold mb-1">Your Plan & Details</h2>
 
         {justUpdated && (
           <div
@@ -335,6 +420,7 @@ export default async function AccountPage({
         )}
 
         <form action={updatePrefs} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+          {/* Provider */}
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Provider</label>
             <select
@@ -344,17 +430,14 @@ export default async function AccountPage({
               className="w-full border rounded-lg px-3 py-2 bg-white"
               required
             >
-              <option value="" disabled>
-                Select a provider
-              </option>
+              <option value="" disabled>Select a provider</option>
               {PROVIDERS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
+                <option key={p} value={p}>{p}</option>
               ))}
             </select>
           </div>
 
+          {/* Profile */}
           <div className="sm:col-span-1">
             <label className="text-sm text-slate-600">Profile</label>
             <select
@@ -364,21 +447,101 @@ export default async function AccountPage({
               className="w-full border rounded-lg px-3 py-2 bg-white"
               required
             >
-              <option value="" disabled>
-                Select a profile
-              </option>
+              <option value="" disabled>Select a profile</option>
               {PROFILES.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
+                <option key={p} value={p}>{p}</option>
               ))}
             </select>
           </div>
 
+          {/* Planned retirement year */}
           <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">Planned Retirement Year</label>
+            <input
+              type="number"
+              name="planned_retirement_year"
+              placeholder="YYYY"
+              defaultValue={planned_retirement_year ?? ""}
+              className="w-full border rounded-lg px-3 py-2"
+              min={new Date().getFullYear()}
+              max={new Date().getFullYear() + 60}
+            />
+          </div>
+
+          {/* Employer */}
+          <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">Employer / Plan Sponsor</label>
+            <input
+              type="text"
+              name="employer"
+              placeholder="e.g., Southwest Airlines"
+              defaultValue={employer || ""}
+              className="w-full border rounded-lg px-3 py-2"
+            />
+          </div>
+
+          {/* Income band */}
+          <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">Household Income Range</label>
+            <select
+              name="income_band"
+              defaultValue={income_band || ""}
+              className="w-full border rounded-lg px-3 py-2 bg-white"
+            >
+              <option value="">Prefer not to say</option>
+              {INCOME_BANDS.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* State */}
+          <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">State</label>
+            <select
+              name="state"
+              defaultValue={state || ""}
+              className="w-full border rounded-lg px-3 py-2 bg-white"
+            >
+              <option value="">Select</option>
+              {US_STATES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Comms pref */}
+          <div className="sm:col-span-3">
+            <label className="text-sm text-slate-600 block mb-1">Communication Preference</label>
+            <div className="flex items-center gap-4 text-sm">
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" name="comms_pref" value="email" defaultChecked={comms_pref === "email" || !comms_pref} />
+                Email only
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" name="comms_pref" value="phone_email" defaultChecked={comms_pref === "phone_email"} />
+                Phone + Email
+              </label>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div className="sm:col-span-3">
+            <label className="text-sm text-slate-600">Notes (optional)</label>
+            <textarea
+              name="client_notes"
+              rows={3}
+              placeholder="Anything you'd like your advisor to know."
+              defaultValue={client_notes || ""}
+              className="w-full border rounded-lg px-3 py-2"
+            />
+          </div>
+
+          {/* Save */}
+          <div className="sm:col-span-3">
             <button
               type="submit"
-              className="w-full inline-flex items-center justify-center rounded-lg px-4 py-2 bg-sky-600 text-white font-semibold"
+              className="w-full sm:w-auto inline-flex items-center justify-center rounded-lg px-4 py-2 bg-sky-600 text-white font-semibold"
             >
               Save
             </button>
@@ -386,6 +549,35 @@ export default async function AccountPage({
         </form>
       </section>
 
+      {/* Advisor Review panel */}
+      <section>
+        <h2 className="text-xl font-semibold mb-2">Advisor Review</h2>
+        <div className="rounded-lg border p-4 bg-white">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <div className="text-slate-600">
+                Last Advisor Review:{" "}
+                <strong>
+                  {last_advisor_review_at
+                    ? new Date(last_advisor_review_at).toLocaleDateString()
+                    : "—"}
+                </strong>
+              </div>
+              <div className="text-slate-600">
+                Use code <span className="font-semibold">401kAdvisor10</span> at checkout for <strong>10% off</strong>.
+              </div>
+            </div>
+            <a
+              href={ADVISOR_REVIEW_URL}
+              className="inline-flex items-center justify-center rounded-lg px-4 py-2 bg-emerald-600 text-white font-semibold hover:bg-emerald-700"
+            >
+              Book your $149 Advisor Review
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* Billing */}
       <section>
         <h2 className="text-xl font-semibold mb-3">Billing</h2>
         <form action={createPortalAction}>
@@ -398,6 +590,7 @@ export default async function AccountPage({
         </p>
       </section>
 
+      {/* Past Reports */}
       <section>
         <h2 className="text-xl font-semibold mb-3">Past Reports</h2>
         {reports.length === 0 ? (
@@ -407,10 +600,7 @@ export default async function AccountPage({
             {reports.map((r: any) => {
               const ts = r.preview_created_at || r.order_created_at;
               const label = r.preview_id ? `Preview ${String(r.preview_id).slice(0, 8)}` : `Order ${r.order_id}`;
-              const sub = `${r.preview_provider ? `${r.preview_provider} · ` : ""}${r.preview_profile || ""}`.replace(
-                / · $/,
-                ""
-              );
+              const sub = `${r.preview_provider ? `${r.preview_provider} · ` : ""}${r.preview_profile || ""}`.replace(/ · $/, "");
               const href = r.preview_id ? `/api/report/pdf?previewId=${encodeURIComponent(r.preview_id)}` : "#";
               return (
                 <li
