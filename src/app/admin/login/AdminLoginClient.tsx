@@ -43,9 +43,10 @@ export default function AdminLoginClient() {
   const [rows, setRows] = useState<ClientRow[]>([]);
   const [search, setSearch] = useState("");
   const [isFetching, setIsFetching] = useState(false);
-  const [saveBusy, setSaveBusy] = useState<string | null>(null); // email of row saving
+  const [saveBusy, setSaveBusy] = useState<string | null>(null);
   const [justSavedEmail, setJustSavedEmail] = useState<string | null>(null);
 
+  // local editable copies
   const [drafts, setDrafts] = useState<Record<string, ClientRow>>({});
 
   const visibleRows = useMemo(() => {
@@ -69,6 +70,7 @@ export default function AdminLoginClient() {
           setErr(`Fetch error: ${res.status}`);
         }
       } catch {
+        // ignore
       } finally {
         setIsFetching(false);
       }
@@ -173,6 +175,13 @@ export default function AdminLoginClient() {
     setDraft(email, { last_advisor_review_at: iso });
   }
 
+  async function logout() {
+    await fetch("/api/admin/logout", { method: "POST" });
+    setAuthed(false);
+    setRows([]);
+    router.refresh();
+  }
+
   /* ---------------------- Views ---------------------- */
 
   if (!authed) {
@@ -230,6 +239,12 @@ export default function AdminLoginClient() {
           >
             {isFetching ? "Loading…" : "Refresh"}
           </button>
+          <button
+            onClick={logout}
+            className="rounded-md border px-3 py-2 text-sm bg-red-50 text-red-700 hover:bg-red-100"
+          >
+            Logout
+          </button>
         </div>
       </header>
 
@@ -276,6 +291,7 @@ export default function AdminLoginClient() {
                   <td className="px-3 py-2">
                     <div className="font-medium">{r.email}</div>
                   </td>
+
                   <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
@@ -286,6 +302,7 @@ export default function AdminLoginClient() {
                       {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </td>
+
                   <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
@@ -296,6 +313,7 @@ export default function AdminLoginClient() {
                       {PROFILES.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </td>
+
                   <td className="px-3 py-2">
                     <input
                       type="number"
@@ -304,6 +322,7 @@ export default function AdminLoginClient() {
                       onChange={(e) => setDraft(r.email, { planned_retirement_year: e.target.value ? Number(e.target.value) : null })}
                     />
                   </td>
+
                   <td className="px-3 py-2">
                     <input
                       type="text"
@@ -313,6 +332,7 @@ export default function AdminLoginClient() {
                       placeholder="Employer"
                     />
                   </td>
+
                   <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
@@ -323,6 +343,7 @@ export default function AdminLoginClient() {
                       {INCOME_BANDS.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
                   </td>
+
                   <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
@@ -333,6 +354,7 @@ export default function AdminLoginClient() {
                       {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
+
                   <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
@@ -347,6 +369,7 @@ export default function AdminLoginClient() {
                       ))}
                     </select>
                   </td>
+
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <input
@@ -365,6 +388,7 @@ export default function AdminLoginClient() {
                       </button>
                     </div>
                   </td>
+
                   <td className="px-3 py-2">
                     <textarea
                       className="border rounded px-2 py-1 w-64 h-16"
@@ -373,6 +397,7 @@ export default function AdminLoginClient() {
                       placeholder="Notes..."
                     />
                   </td>
+
                   <td className="px-3 py-2">
                     <div className="flex flex-col gap-2">
                       <button
@@ -391,6 +416,7 @@ export default function AdminLoginClient() {
                       )}
                     </div>
                   </td>
+
                   <td className="px-3 py-2">
                     {stripeUrl ? (
                       <a
@@ -399,12 +425,13 @@ export default function AdminLoginClient() {
                         className="text-blue-600 hover:underline"
                         title="Open in Stripe Dashboard"
                       >
-                        Open Stripe
+                        Open
                       </a>
                     ) : (
                       <span className="text-slate-400">—</span>
                     )}
                   </td>
+
                   <td className="px-3 py-2">
                     {pdfUrl ? (
                       <a
@@ -413,7 +440,7 @@ export default function AdminLoginClient() {
                         className="text-blue-600 hover:underline"
                         title="Open latest PDF"
                       >
-                        Open PDF
+                        Open
                       </a>
                     ) : (
                       <span className="text-slate-400">—</span>
