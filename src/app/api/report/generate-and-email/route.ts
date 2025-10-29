@@ -303,6 +303,8 @@ export async function POST(req: NextRequest) {
       future results. Review the attached report carefully and consider your objectives, risk tolerance, time horizon, and tax situation. Advisory services
       are offered only where Kenai is properly registered or exempt from registration. For more information, visit
       <a href="https://gradeyour401k.com" style="color:#0b59c7;text-decoration:none;">gradeyour401k.com</a>.
+      <a href="https://pilotyour401k.com" style="color:#0b59c7;text-decoration:none;">pilotyour401k.com</a>.
+      <a href="https://kenaiinvest.com" style="color:#0b59c7;text-decoration:none;">kenaiinvest.com</a>.
     </p>
   </div>
 `,
