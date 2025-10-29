@@ -275,7 +275,7 @@ export async function POST(req: NextRequest) {
       </tr>
     </table>
 
-    <h3 style="margin:16px 0 8px 0;">Recommended Next Steps</h3>
+    <h3 style="margin:16px 0 8px 0;">Your 401(k) just received a new clearance — implement your new allocation today.</h3>
     <h3 style="margin:16px 0 8px 0;">Recommended Next Steps</h3>
 <ol style="margin:0 0 16px 20px;padding:0;">
   <li style="margin:6px 0;">Log in to your <strong>GradeYour401k</strong> account.</li>
