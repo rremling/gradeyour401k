@@ -13,8 +13,10 @@ type ClientRow = {
   income_band: string | null;
   state: string | null;
   comms_pref: string | null;
-  last_advisor_review_at: string | null; // ISO date (YYYY-MM-DD) preferred
+  last_advisor_review_at: string | null; // YYYY-MM-DD
   client_notes: string | null;
+  stripe_customer_id: string | null;
+  latest_preview_id: string | null;
 };
 
 const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
@@ -44,7 +46,6 @@ export default function AdminLoginClient() {
   const [saveBusy, setSaveBusy] = useState<string | null>(null); // email of row saving
   const [justSavedEmail, setJustSavedEmail] = useState<string | null>(null);
 
-  // local editable copy per row
   const [drafts, setDrafts] = useState<Record<string, ClientRow>>({});
 
   const visibleRows = useMemo(() => {
@@ -54,7 +55,6 @@ export default function AdminLoginClient() {
   }, [rows, search]);
 
   useEffect(() => {
-    // On mount, try to fetch clients; if 401, we’re not authed yet.
     (async () => {
       setIsFetching(true);
       try {
@@ -68,8 +68,7 @@ export default function AdminLoginClient() {
         } else {
           setErr(`Fetch error: ${res.status}`);
         }
-      } catch (e: any) {
-        // ignore if not set up yet
+      } catch {
       } finally {
         setIsFetching(false);
       }
@@ -90,7 +89,6 @@ export default function AdminLoginClient() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error || "Unauthorized");
       }
-      // Load CRM immediately (no redirect needed)
       await reloadClients();
       setAuthed(true);
     } catch (e: any) {
@@ -119,7 +117,6 @@ export default function AdminLoginClient() {
       }
       const data = await res.json();
       setRows(data?.clients || []);
-      // reset drafts for any emails not in response
       setDrafts((d) => {
         const next: Record<string, ClientRow> = {};
         for (const r of data?.clients || []) {
@@ -166,14 +163,13 @@ export default function AdminLoginClient() {
       setErr(e?.message || "Save failed");
     } finally {
       setSaveBusy(null);
-      // remove flag after a moment
       setTimeout(() => setJustSavedEmail(null), 2500);
     }
   }
 
   function markToday(email: string) {
     const today = new Date();
-    const iso = today.toISOString().slice(0, 10); // YYYY-MM-DD
+    const iso = today.toISOString().slice(0, 10);
     setDraft(email, { last_advisor_review_at: iso });
   }
 
@@ -216,7 +212,7 @@ export default function AdminLoginClient() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl p-6 space-y-4">
+    <main className="mx-auto max-w-7xl p-6 space-y-4">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-2xl font-semibold">Advisor CRM</h1>
         <div className="flex items-center gap-2">
@@ -254,24 +250,33 @@ export default function AdminLoginClient() {
               <th className="text-left px-3 py-2">Last Review</th>
               <th className="text-left px-3 py-2">Notes</th>
               <th className="text-left px-3 py-2">Actions</th>
+              <th className="text-left px-3 py-2">Stripe</th>
+              <th className="text-left px-3 py-2">Latest PDF</th>
             </tr>
           </thead>
           <tbody>
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={13} className="px-3 py-8 text-center text-slate-500">
                   {isFetching ? "Loading…" : "No clients found."}
                 </td>
               </tr>
             )}
             {visibleRows.map((r) => {
               const d = getDraft(r.email);
+              const stripeUrl = r.stripe_customer_id
+                ? `https://dashboard.stripe.com/customers/${r.stripe_customer_id}`
+                : null;
+              const pdfUrl = r.latest_preview_id
+                ? `/api/report/pdf?previewId=${encodeURIComponent(r.latest_preview_id)}`
+                : null;
+
               return (
-                <tr key={r.email} className="border-t">
-                  <td className="px-3 py-2 align-top">
+                <tr key={r.email} className="border-t align-top">
+                  <td className="px-3 py-2">
                     <div className="font-medium">{r.email}</div>
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
                       value={d.provider || ""}
@@ -281,7 +286,7 @@ export default function AdminLoginClient() {
                       {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
                       value={d.profile || ""}
@@ -291,7 +296,7 @@ export default function AdminLoginClient() {
                       {PROFILES.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <input
                       type="number"
                       className="border rounded px-2 py-1 w-24"
@@ -299,7 +304,7 @@ export default function AdminLoginClient() {
                       onChange={(e) => setDraft(r.email, { planned_retirement_year: e.target.value ? Number(e.target.value) : null })}
                     />
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <input
                       type="text"
                       className="border rounded px-2 py-1 w-44"
@@ -308,7 +313,7 @@ export default function AdminLoginClient() {
                       placeholder="Employer"
                     />
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
                       value={d.income_band || ""}
@@ -318,7 +323,7 @@ export default function AdminLoginClient() {
                       {INCOME_BANDS.map(b => <option key={b} value={b}>{b}</option>)}
                     </select>
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
                       value={d.state || ""}
@@ -328,7 +333,7 @@ export default function AdminLoginClient() {
                       {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <select
                       className="border rounded px-2 py-1 bg-white"
                       value={d.comms_pref || ""}
@@ -342,7 +347,7 @@ export default function AdminLoginClient() {
                       ))}
                     </select>
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <input
                         type="date"
@@ -360,7 +365,7 @@ export default function AdminLoginClient() {
                       </button>
                     </div>
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <textarea
                       className="border rounded px-2 py-1 w-64 h-16"
                       value={d.client_notes || ""}
@@ -368,7 +373,7 @@ export default function AdminLoginClient() {
                       placeholder="Notes..."
                     />
                   </td>
-                  <td className="px-3 py-2 align-top">
+                  <td className="px-3 py-2">
                     <div className="flex flex-col gap-2">
                       <button
                         className="rounded bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 disabled:opacity-50"
@@ -385,6 +390,34 @@ export default function AdminLoginClient() {
                         </span>
                       )}
                     </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {stripeUrl ? (
+                      <a
+                        href={stripeUrl}
+                        target="_blank"
+                        className="text-blue-600 hover:underline"
+                        title="Open in Stripe Dashboard"
+                      >
+                        Open Stripe
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    {pdfUrl ? (
+                      <a
+                        href={pdfUrl}
+                        target="_blank"
+                        className="text-blue-600 hover:underline"
+                        title="Open latest PDF"
+                      >
+                        Open PDF
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
                   </td>
                 </tr>
               );
