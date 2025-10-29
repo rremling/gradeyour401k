@@ -92,6 +92,13 @@ async function updatePrefs(formData: FormData) {
     return { ok: false, error: "Invalid provider or profile." };
   }
 
+  // NEW: contact fields (optional)
+  const full_name = (String(formData.get("full_name") || "").trim() || null) as string | null;
+  let phone = (String(formData.get("phone") || "").trim() || null) as string | null;
+  if (phone && phone.length > 30) {
+    return { ok: false, error: "Phone looks too long." };
+  }
+
   // CRM-ish fields
   const plannedYearRaw = String(formData.get("planned_retirement_year") || "").trim();
   const employer = String(formData.get("employer") || "").trim() || null;
@@ -120,13 +127,13 @@ async function updatePrefs(formData: FormData) {
   }
 
   try {
-    // NOTE: cleaned placeholders ($1..$9)
+    // NOTE: added full_name ($9) and phone ($10); email shifts to $11
     const result: any = await query(
       `
       WITH target AS (
         SELECT id
           FROM public.orders
-         WHERE email = $9
+         WHERE email = $11
          ORDER BY (plan_key = 'annual') DESC, created_at DESC
          LIMIT 1
       )
@@ -139,6 +146,8 @@ async function updatePrefs(formData: FormData) {
              state = $6,
              comms_pref = $7,
              client_notes = $8,
+             full_name = $9,
+             phone = $10,
              updated_at = NOW()
         FROM target
        WHERE o.id = target.id
@@ -153,7 +162,9 @@ async function updatePrefs(formData: FormData) {
         state,                   // $6
         comms_pref,              // $7
         client_notes,            // $8
-        claims.email             // $9
+        full_name,               // $9  (NEW)
+        phone,                   // $10 (NEW)
+        claims.email             // $11
       ]
     );
 
@@ -172,15 +183,11 @@ async function updatePrefs(formData: FormData) {
     });
 
   } catch (e: any) {
-    // If Next's redirect gets thrown, rethrow it so it's not logged as an error.
-    if (e?.digest === "NEXT_REDIRECT") {
-      throw e;
-    }
+    if (e?.digest === "NEXT_REDIRECT") throw e;
     console.error("[account:updatePrefs] error:", e?.message || e);
     return { ok: false, error: "Could not save preferences. Please try again." };
   }
 
-  // Ensure fresh SSR read & show Saved! near button
   revalidatePath("/account");
   redirect("/account?updated=1");
 }
@@ -257,7 +264,8 @@ async function getContext() {
     email: null, reports: [] as any[], provider: "", profile: "",
     last_advisor_review_at: null as Date | string | null,
     planned_retirement_year: null as number | null,
-    employer: "", income_band: "", state: "", comms_pref: "", client_notes: ""
+    employer: "", income_band: "", state: "", comms_pref: "", client_notes: "",
+    full_name: "", phone: ""
   };
 
   const email = claims.email;
@@ -287,7 +295,9 @@ async function getContext() {
             income_band,
             state,
             comms_pref,
-            client_notes
+            client_notes,
+            full_name,
+            phone
        FROM public.orders
       WHERE email = $1
       ORDER BY (plan_key = 'annual') DESC, created_at DESC
@@ -311,6 +321,8 @@ async function getContext() {
     state: pref.state || "",
     comms_pref: pref.comms_pref || "",
     client_notes: pref.client_notes || "",
+    full_name: pref.full_name || "",
+    phone: pref.phone || "",
   };
 }
 
@@ -325,13 +337,13 @@ export default async function AccountPage({
     email, reports, provider, profile,
     last_advisor_review_at,
     planned_retirement_year,
-    employer, income_band, state, comms_pref, client_notes
+    employer, income_band, state, comms_pref, client_notes,
+    full_name, phone
   } = await getContext();
 
   const errorMsg = searchParams?.error || "";
   const magicStatus = searchParams?.magic;
 
-  // Check for "Saved!" (moved next to the Save button below)
   const cookieUpdated = cookies().get("account_updated")?.value === "1";
   const justUpdated = searchParams?.updated === "1" || cookieUpdated;
 
@@ -497,6 +509,32 @@ export default async function AccountPage({
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
+          </div>
+
+          {/* NEW: Full Name */}
+          <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">Full Name</label>
+            <input
+              type="text"
+              name="full_name"
+              placeholder="Your name"
+              defaultValue={full_name || ""}
+              className="w-full border rounded-lg px-3 py-2"
+              maxLength={200}
+            />
+          </div>
+
+          {/* NEW: Phone */}
+          <div className="sm:col-span-1">
+            <label className="text-sm text-slate-600">Phone</label>
+            <input
+              type="tel"
+              name="phone"
+              placeholder="(555) 555-5555"
+              defaultValue={phone || ""}
+              className="w-full border rounded-lg px-3 py-2"
+              maxLength={30}
+            />
           </div>
 
           {/* Comms pref */}
