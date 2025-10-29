@@ -626,9 +626,6 @@ export default async function AccountPage({
                     : "—"}
                 </strong>
               </div>
-              <div className="text-slate-600">
-                Use code <span className="font-semibold">401kAdvisor10</span> at checkout for <strong>10% off</strong>.
-              </div>
             </div>
             <a
               href={ADVISOR_REVIEW_URL}
