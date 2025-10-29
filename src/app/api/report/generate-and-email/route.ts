@@ -276,28 +276,23 @@ export async function POST(req: NextRequest) {
     </table>
 
     <h3 style="margin:16px 0 8px 0;">Recommended Next Steps</h3>
-    <ol style="margin:0 0 16px 20px;padding:0;">
-      <li style="margin:6px 0;">Log in to your 401(k) plan.</li>
-      <li style="margin:6px 0;">Update your allocations to align with your <em>Investor Profile</em> and our <em>Market Profile</em> guidance in the attached report.</li>
-      <li style="margin:6px 0;">Save/confirm your changes inside the plan.</li>
-      <li style="margin:6px 0;">
-        <strong>Ready for a pro’s second opinion?</strong><br />
-        Schedule a <strong>30-Minute 401(k) Review Call</strong> with Roger Remling, Tax & Financial Advisor. We’ll confirm your updates, uncover hidden inefficiencies, and ensure your portfolio’s flight path is on course.
-      </li>
-    </ol>
+    <h3 style="margin:16px 0 8px 0;">Recommended Next Steps</h3>
+<ol style="margin:0 0 16px 20px;padding:0;">
+  <li style="margin:6px 0;">Log in to your <strong>GradeYour401k</strong> account.</li>
+  <li style="margin:6px 0;">Review your latest report and confirm your provider and investor profile are up to date.</li>
+  <li style="margin:6px 0;">Update your details if needed and view/download past reports anytime.</li>
+</ol>
+
 
     <!-- Blue CTA button -->
     <div style="margin:20px 0 10px;">
-      <a href="https://gradeyour401k.com/review"
+      <a href="https://gradeyour401k.com/account"
          style="display:inline-block;padding:12px 18px;background:#0b59c7;color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;">
-        Book Your 401(k) Review Call — $149
+        Account Login
       </a>
     </div>
-    <p style="margin:0 0 16px 0; font-size:14px; color:#555;">
-      After checkout you’ll securely upload your 401(k) statement and pick a time on our calendar.
-    </p>
-
-    <p style="margin:0 0 16px 0;">Questions? Just give us a call—happy to help.</p>
+    
+    <p style="margin:0 0 16px 0;">Questions? Just give us a call—happy to help. (806) 359-3100</p>
     <p style="margin:0 0 8px 0;">— GradeYour401k</p>
 
     <hr style="border:none;border-top:1px solid #e6e6e6;margin:16px 0;" />
