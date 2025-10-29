@@ -30,17 +30,13 @@ const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 // Advisor review booking target (adjust if you have a dedicated page)
 const ADVISOR_REVIEW_URL = "/pricing";
 
-// States (short list — expand if you like)
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DC","DE","FL","GA","HI","IA","ID","IL","IN","KS","KY",
   "LA","MA","MD","ME","MI","MN","MO","MS","MT","NC","ND","NE","NH","NJ","NM","NV","NY","OH",
   "OK","OR","PA","RI","SC","SD","TN","TX","UT","VA","VT","WA","WI","WV","WY",
 ] as const;
 
-const INCOME_BANDS = [
-  "<75k", "75-150k", "150-300k", "300-600k", "600k+"
-] as const;
-
+const INCOME_BANDS = ["<75k", "75-150k", "150-300k", "300-600k", "600k+"] as const;
 const COMMS_PREFS = ["email", "phone_email"] as const;
 
 /* ───────────────────── Server Actions ───────────────────── */
@@ -157,7 +153,6 @@ async function updatePrefs(formData: FormData) {
         state,                   // $6
         comms_pref,              // $7
         client_notes,            // $8
-        // $9-$10 unused (kept for clarity), $11 email:
         null, null,
         claims.email             // $11
       ]
@@ -168,7 +163,7 @@ async function updatePrefs(formData: FormData) {
       return { ok: false, error: "No order found to update for this account." };
     }
 
-    // Flash cookie so the page can show "Updated!"
+    // Flash cookie so the page can show "Saved!" (Updated!) and persist field selections
     const c = cookies();
     c.set("account_updated", "1", {
       path: "/account",
@@ -178,7 +173,8 @@ async function updatePrefs(formData: FormData) {
     });
 
     revalidatePath("/account");
-    redirect("/account");
+    // IMPORTANT: add query param so banner always shows, and ensure a fresh SSR read so fields persist
+    redirect("/account?updated=1");
   } catch (e: any) {
     console.error("[account:updatePrefs] error:", e?.message || e);
     return { ok: false, error: "Could not save preferences. Please try again." };
@@ -331,7 +327,7 @@ export default async function AccountPage({
   const errorMsg = searchParams?.error || "";
   const magicStatus = searchParams?.magic;
 
-  // Show "Updated!" if query param OR flash cookie exists
+  // Show "Saved!" if query param OR flash cookie exists
   const cookieUpdated = cookies().get("account_updated")?.value === "1";
   const justUpdated = searchParams?.updated === "1" || cookieUpdated;
 
@@ -386,6 +382,17 @@ export default async function AccountPage({
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
+      {/* Saved banner */}
+      {justUpdated && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="border border-green-200 bg-green-50 text-green-800 rounded-md px-3 py-2"
+        >
+          Saved!
+        </div>
+      )}
+
       {errorMsg ? (
         <div className="border border-red-300 bg-red-50 text-red-800 rounded-md px-3 py-2">
           {errorMsg}
@@ -407,17 +414,6 @@ export default async function AccountPage({
       {/* Provider & Profile + Details (single form) */}
       <section>
         <h2 className="text-xl font-semibold mb-1">Your Plan & Details</h2>
-
-        {justUpdated && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="mb-3 inline-flex items-center gap-2 rounded-md bg-green-50 text-green-800 border border-green-200 px-2.5 py-1 text-sm"
-          >
-            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-            Updated!
-          </div>
-        )}
 
         <form action={updatePrefs} className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
           {/* Provider */}
@@ -590,31 +586,32 @@ export default async function AccountPage({
         </p>
       </section>
 
-      {/* Past Reports */}
+      {/* Past Reports (PDFs ONLY) */}
       <section>
         <h2 className="text-xl font-semibold mb-3">Past Reports</h2>
-        {reports.length === 0 ? (
+        {reports.filter((r: any) => !!r.preview_id).length === 0 ? (
           <p className="text-slate-600">No reports yet.</p>
         ) : (
           <ul className="space-y-2">
-            {reports.map((r: any) => {
-              const ts = r.preview_created_at || r.order_created_at;
-              const label = r.preview_id ? `Preview ${String(r.preview_id).slice(0, 8)}` : `Order ${r.order_id}`;
-              const sub = `${r.preview_provider ? `${r.preview_provider} · ` : ""}${r.preview_profile || ""}`.replace(/ · $/, "");
-              const href = r.preview_id ? `/api/report/pdf?previewId=${encodeURIComponent(r.preview_id)}` : "#";
-              return (
-                <li
-                  key={`${r.order_id}-${r.preview_id || "nopreview"}`}
-                  className="flex items-center justify-between border rounded-lg p-3"
-                >
-                  <div>
-                    <div className="font-medium">{label}</div>
-                    <div className="text-sm text-slate-500">
-                      {sub ? `${sub} · ` : ""}
-                      {ts ? new Date(ts).toLocaleString() : ""}
+            {reports
+              .filter((r: any) => !!r.preview_id) // <-- only keep items with generated PDFs
+              .map((r: any) => {
+                const ts = r.preview_created_at || r.order_created_at;
+                const label = `Preview ${String(r.preview_id).slice(0, 8)}`;
+                const sub = `${r.preview_provider ? `${r.preview_provider} · ` : ""}${r.preview_profile || ""}`.replace(/ · $/, "");
+                const href = `/api/report/pdf?previewId=${encodeURIComponent(r.preview_id)}`;
+                return (
+                  <li
+                    key={`${r.order_id}-${r.preview_id}`}
+                    className="flex items-center justify-between border rounded-lg p-3"
+                  >
+                    <div>
+                      <div className="font-medium">{label}</div>
+                      <div className="text-sm text-slate-500">
+                        {sub ? `${sub} · ` : ""}
+                        {ts ? new Date(ts).toLocaleString() : ""}
+                      </div>
                     </div>
-                  </div>
-                  {r.preview_id ? (
                     <a
                       href={href}
                       target="_blank"
@@ -622,12 +619,9 @@ export default async function AccountPage({
                     >
                       Download PDF
                     </a>
-                  ) : (
-                    <span className="text-slate-400 text-sm">No preview</span>
-                  )}
-                </li>
-              );
-            })}
+                  </li>
+                );
+              })}
           </ul>
         )}
       </section>
