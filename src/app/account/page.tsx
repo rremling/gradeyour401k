@@ -32,8 +32,31 @@ const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 async function sendMagicLink(formData: FormData) {
   "use server";
   const email = String(formData.get("email") || "").trim();
-  if (!email) return { ok: false, error: "Email required" };
+  if (!email) {
+    redirect("/account?magic=invalid");
+  }
 
+  // 1) Check if we have an account for this email
+  const r: any = await query(
+    `
+      SELECT 1
+        FROM public.orders
+       WHERE email = $1
+       ORDER BY (plan_key = 'annual') DESC, created_at DESC
+       LIMIT 1
+    `,
+    [email]
+  );
+
+  const hasAccount =
+    Array.isArray(r?.rows) ? r.rows.length > 0 : (Array.isArray(r) ? r.length > 0 : false);
+
+  // 2) If no account, DO NOT send email; show "not found" message
+  if (!hasAccount) {
+    redirect("/account?magic=notfound");
+  }
+
+  // 3) If account exists, send the magic link
   const base = process.env.NEXT_PUBLIC_BASE_URL || "";
   const res = await fetch(`${base}/api/account/magic-link`, {
     method: "POST",
@@ -41,11 +64,14 @@ async function sendMagicLink(formData: FormData) {
     body: JSON.stringify({ email }),
     cache: "no-store",
   });
+
   if (!res.ok) {
-    const j = await res.json().catch(() => ({}));
-    return { ok: false, error: j?.error || "Failed to send link" };
+    // route returned an error; surface a generic failure
+    redirect("/account?magic=sendfail");
   }
-  return { ok: true };
+
+  // 4) Success banner
+  redirect("/account?magic=sent");
 }
 
 async function updatePrefs(formData: FormData) {
@@ -89,13 +115,13 @@ async function updatePrefs(formData: FormData) {
       return { ok: false, error: "No order found to update for this account." };
     }
 
-    // Flash cookie so the page can show "Updated!" without relying on URL params.
+    // Flash cookie for "Updated!"
     const c = cookies();
     c.set("account_updated", "1", {
       path: "/account",
-      httpOnly: false,         // readable by client if you ever want
+      httpOnly: false,
       sameSite: "lax",
-      maxAge: 60,              // 1 minute is plenty
+      maxAge: 60,
     });
 
     revalidatePath("/account");
@@ -143,24 +169,20 @@ async function createPortalAction() {
 
 async function logoutAction() {
   "use server";
-  // expire the auth cookie(s)
   const c = cookies();
 
-  // Adjust domain if you set one when creating the cookie (see note below)
-  const cookieDomain = process.env.COOKIE_DOMAIN || undefined; // e.g. ".gradeyour401k.com"
+  const cookieDomain = process.env.COOKIE_DOMAIN || undefined;
   const isSecure = process.env.NODE_ENV !== "development";
 
-  // main account session
   c.set("acct", "", {
     path: "/",
     httpOnly: true,
     sameSite: "lax",
     secure: isSecure,
-    maxAge: 0,           // expire immediately
-    domain: cookieDomain // must match how it was originally set
+    maxAge: 0,
+    domain: cookieDomain
   });
 
-  // optional “flash” we added earlier
   c.set("account_updated", "", {
     path: "/account",
     httpOnly: false,
@@ -170,14 +192,8 @@ async function logoutAction() {
     domain: cookieDomain
   });
 
-  // If you have any other related cookies, clear them here the same way:
-  // c.set("admin_session", "", { path: "/", httpOnly: true, sameSite: "lax", secure: isSecure, maxAge: 0, domain: cookieDomain });
-
-  // now go home
   redirect("/");
 }
-
-
 
 /* ───────────────────── Data Loaders ───────────────────── */
 
@@ -225,10 +241,11 @@ async function getContext() {
 export default async function AccountPage({
   searchParams = {},
 }: {
-  searchParams?: { error?: string; updated?: string };
+  searchParams?: { error?: string; updated?: string; magic?: "sent" | "notfound" | "invalid" | "sendfail" };
 }) {
   const { email, reports, provider, profile } = await getContext();
   const errorMsg = searchParams?.error || "";
+  const magicStatus = searchParams?.magic;
 
   // Show "Updated!" if query param OR flash cookie exists
   const cookieUpdated = cookies().get("account_updated")?.value === "1";
@@ -241,6 +258,29 @@ export default async function AccountPage({
         <p className="text-slate-600 mb-4">
           Enter your email and we'll send you a secure link to view past reports and manage preferences.
         </p>
+
+        {/* Banners for magic link result */}
+        {magicStatus === "sent" && (
+          <div className="mb-3 border border-green-200 bg-green-50 text-green-800 rounded-md px-3 py-2">
+            We found your account and sent a sign-in link to your email.
+          </div>
+        )}
+        {magicStatus === "notfound" && (
+          <div className="mb-3 border border-amber-200 bg-amber-50 text-amber-900 rounded-md px-3 py-2">
+            We couldn’t find an active account for that email. Please check the address used at purchase or contact support.
+          </div>
+        )}
+        {magicStatus === "invalid" && (
+          <div className="mb-3 border border-red-200 bg-red-50 text-red-800 rounded-md px-3 py-2">
+            Please enter a valid email address.
+          </div>
+        )}
+        {magicStatus === "sendfail" && (
+          <div className="mb-3 border border-red-200 bg-red-50 text-red-800 rounded-md px-3 py-2">
+            We couldn’t send the link right now. Please try again in a moment.
+          </div>
+        )}
+
         <form action={sendMagicLink} className="space-y-3">
           <input
             type="email"
