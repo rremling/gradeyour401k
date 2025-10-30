@@ -13,12 +13,13 @@ type ClientRow = {
   income_band: string | null;
   state: string | null;
   comms_pref: string | null;
-  last_advisor_review_at: string | null; // YYYY-MM-DD
+  last_advisor_review_at: string | null; // YYYY-MM-DD (API now casts properly)
   client_notes: string | null;
   stripe_customer_id: string | null;
   latest_preview_id: string | null;
-  // NEW
-  last_statement_uploaded_at?: string | null; // ISO timestamp or YYYY-MM-DD
+  last_statement_uploaded_at?: string | null;
+  // NEW:
+  full_name?: string | null;
 };
 
 const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
@@ -74,7 +75,7 @@ export default function AdminLoginClient() {
     (async () => {
       setIsFetching(true);
       try {
-        const res = await fetch(`/api/admin/clients`, { cache: "no-store" });
+        const res = await fetch(`/api/admin/clients`, { cache: "no-store", credentials: "include" });
         if (res.ok) {
           const data = await res.json();
           setRows(data?.clients || []);
@@ -101,6 +102,7 @@ export default function AdminLoginClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
+        credentials: "include",
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -122,7 +124,7 @@ export default function AdminLoginClient() {
       const url = search.trim()
         ? `/api/admin/clients?search=${encodeURIComponent(search.trim())}`
         : `/api/admin/clients`;
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetch(url, { cache: "no-store", credentials: "include" });
       if (!res.ok) {
         if (res.status === 401) {
           setAuthed(false);
@@ -169,6 +171,7 @@ export default function AdminLoginClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, ...row }),
+        credentials: "include",
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -191,7 +194,7 @@ export default function AdminLoginClient() {
   }
 
   async function logout() {
-    await fetch("/api/admin/logout", { method: "POST" });
+    await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
     setAuthed(false);
     setRows([]);
     router.refresh();
@@ -274,12 +277,6 @@ export default function AdminLoginClient() {
         </div>
       </header>
 
-      {err && (
-        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
-          {err}
-        </div>
-      )}
-
       {/* --- VERTICAL STACKED CARDS --- */}
       <div className="space-y-3">
         {visibleRows.length === 0 && (
@@ -303,7 +300,9 @@ export default function AdminLoginClient() {
               {/* Header */}
               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                 <div>
-                  <div className="font-semibold break-all">{r.email}</div>
+                  <div className="font-semibold break-all">
+                    {d.full_name ? `${d.full_name} — ` : ""}{r.email}
+                  </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                     <span className="inline-flex items-center rounded-full border px-2 py-0.5 bg-slate-50">
                       {d.provider || "—"}
@@ -363,6 +362,17 @@ export default function AdminLoginClient() {
 
               {/* Editable fields */}
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Full name</label>
+                  <input
+                    type="text"
+                    className="w-full border rounded px-2 py-1"
+                    value={d.full_name || ""}
+                    onChange={(e) => setDraft(r.email, { full_name: e.target.value })}
+                    placeholder="Client name"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">Provider</label>
                   <select
@@ -499,6 +509,46 @@ export default function AdminLoginClient() {
                     Saved!
                   </span>
                 )}
+
+                {/* Quick links */}
+                <div className="ml-auto flex gap-2">
+                  {r.latest_preview_id ? (
+                    <a
+                      href={`/api/report/pdf?previewId=${encodeURIComponent(r.latest_preview_id)}`}
+                      target="_blank"
+                      className="rounded-md border px-2 py-1 text-xs hover:bg-gray-50"
+                      title="Open latest PDF"
+                    >
+                      PDF
+                    </a>
+                  ) : (
+                    <span className="rounded-md border px-2 py-1 text-xs text-slate-400">
+                      PDF
+                    </span>
+                  )}
+                  <a
+                    href={latestStatementUrl(r.email)}
+                    target="_blank"
+                    className="rounded-md border px-2 py-1 text-xs hover:bg-gray-50"
+                    title="Download latest statement"
+                  >
+                    Statement
+                  </a>
+                  {r.stripe_customer_id ? (
+                    <a
+                      href={`https://dashboard.stripe.com/customers/${r.stripe_customer_id}`}
+                      target="_blank"
+                      className="rounded-md border px-2 py-1 text-xs hover:bg-gray-50"
+                      title="Open in Stripe Dashboard"
+                    >
+                      Stripe
+                    </a>
+                  ) : (
+                    <span className="rounded-md border px-2 py-1 text-xs text-slate-400">
+                      Stripe
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           );
