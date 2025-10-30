@@ -1,6 +1,7 @@
 // (File 2) src/app/grade/new/page.tsx
 "use client";
 
+import { Suspense } from "react";
 import { useMemo, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Trash2 } from "lucide-react";
@@ -263,15 +264,6 @@ const FUND_LABELS: Record<string, string> = {
   SPHB:  "Invesco S&P 500 High Beta ETF",
   PSR:   "Invesco Active U.S. Real Estate ETF",
   CSD:   "Invesco Spin-Off ETF",
-
-  // Voya (examples)
-  IIFIX: "Voya International Index (I)",
-  IOSIX: "Voya Small Cap Opportunities (I)",
-  IIGZX: "Voya Growth & Income (R6)",
-  IPIRX: "Voya Inflation-Protected Securities (R6)",
-  IIVGX: "Voya Intermediate Bond (I)",
-  IRGIX: "Voya Global Real Estate (I)",
-  IVRIX: "Voya Real Estate (I)",
 };
 
 // Prefer “TICKER — Name”, fall back to just ticker if unknown
@@ -380,7 +372,29 @@ function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
+/** 
+ * Split into wrapper + inner to satisfy Next’s requirement:
+ * any use of useSearchParams() must live under a <Suspense> boundary.
+ */
 export default function NewGradePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-3xl p-6 space-y-6">
+          <Stepper current={1} />
+          <h1 className="text-2xl font-bold">Get your grade</h1>
+          <div className="rounded border bg-white p-4 text-sm text-gray-600">
+            Loading…
+          </div>
+        </main>
+      }
+    >
+      <NewGradePageInner />
+    </Suspense>
+  );
+}
+
+function NewGradePageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const previewId = (search.get("previewId") || "").trim();
