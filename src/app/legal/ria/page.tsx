@@ -1,8 +1,10 @@
 // src/app/legal/ria/page.tsx
+import type { Metadata } from "next";
+
 export const dynamic = "force-static";
 export const revalidate = false;
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "RIA Agreement | GradeYour401k",
   description:
     "Registered Investment Advisory Agreement for services provided by Kenai Investments Inc.",
@@ -19,13 +21,23 @@ export default function RiaAgreementPage() {
           This Registered Investment Advisory Agreement (“Agreement”) is made between{" "}
           <strong>Kenai Investments Inc.</strong>, a Registered Investment Advisor
           (“Advisor”), and the client (“Client”). By purchasing or using services
-          at <strong>gradeyour401k.com</strong> or <strong>PilotYour401k.com<strong>, 
+          at <strong>gradeyour401k.com</strong> or <strong>PilotYour401k.com</strong>,{" "}
           Client acknowledges and agrees to the terms of this Agreement.
         </p>
         <div className="rounded-md border p-4 bg-gray-50 text-sm">
           <div><strong>Advisor:</strong> Kenai Investments Inc.</div>
           <div><strong>Address:</strong> 2700 S Western, Suite 900, Amarillo, Texas</div>
-          <div><strong>Website:</strong> www.kenaiinvest.com</div>
+          <div>
+            <strong>Website:</strong>{" "}
+            <a
+              href="https://www.kenaiinvest.com"
+              className="text-blue-700 underline underline-offset-2"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              www.kenaiinvest.com
+            </a>
+          </div>
         </div>
       </section>
 
@@ -62,7 +74,7 @@ export default function RiaAgreementPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-xl font-semibold">4. Data & Third-Party Services</h2>
+        <h2 className="text-xl font-semibold">4. Data &amp; Third-Party Services</h2>
         <p>
           Advisor may use third-party market data providers and payment, email,
           and hosting platforms. Accuracy and availability of third-party data
@@ -83,7 +95,7 @@ export default function RiaAgreementPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-xl font-semibold">6. Limitations & Disclaimers</h2>
+        <h2 className="text-xl font-semibold">6. Limitations &amp; Disclaimers</h2>
         <p>
           Investing involves risk, including loss of principal. Past performance
           does not guarantee future results. The service may include model
@@ -98,8 +110,16 @@ export default function RiaAgreementPage() {
         <p>
           Kenai Investments Inc. is a Registered Investment Advisor. Registration
           does not imply a certain level of skill or training. Client may request
-          Advisor’s Form ADV Part 2A and other company documents by visiting 
-          www.kenaiinvest.com.
+          Advisor’s Form ADV Part 2A and other company documents by visiting{" "}
+          <a
+            href="https://www.kenaiinvest.com"
+            className="text-blue-700 underline underline-offset-2"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            www.kenaiinvest.com
+          </a>
+          .
         </p>
       </section>
 
