@@ -1,8 +1,8 @@
 // (File 2) src/app/grade/new/page.tsx
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Trash2 } from "lucide-react";
 
 type InvestorProfile = "Growth" | "Balanced" | "Conservative";
@@ -382,6 +382,8 @@ function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
 
 export default function NewGradePage() {
   const router = useRouter();
+  const search = useSearchParams();
+  const previewId = (search.get("previewId") || "").trim();
 
   // ---- State ----
   const [provider, setProvider] = useState("fidelity");
@@ -391,10 +393,54 @@ export default function NewGradePage() {
     { symbol: "FXNAX", weight: 40 },
   ]);
 
+  // ✅ HYDRATE FROM previewId (server) OR localStorage (fallback)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateFromPreview(id: string) {
+      try {
+        const res = await fetch(`/api/preview/get?id=${encodeURIComponent(id)}`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("not ok");
+        const data = await res.json();
+
+        const nextProvider = String(data?.provider || data?.provider_display || "fidelity");
+        const nextProfile = (String(data?.profile || "Growth") as InvestorProfile);
+        const nextRows: Holding[] = Array.isArray(data?.rows)
+          ? data.rows.map((r: any) => ({
+              symbol: String(r?.symbol || "").toUpperCase(),
+              weight: Number(r?.weight || 0),
+            }))
+          : [];
+
+        if (!cancelled && nextRows.length) {
+          setProvider(nextProvider);
+          setProfile(nextProfile);
+          setRows(nextRows);
+        }
+      } catch {
+        // Optional localStorage fallback (id already stored as gy4k_preview_id after save)
+        try {
+          const lastId = localStorage.getItem("gy4k_preview_id") || "";
+          if (lastId !== id) return;
+          // If you later store a snapshot, you can restore it here.
+        } catch {}
+      }
+    }
+
+    if (previewId) hydrateFromPreview(previewId);
+    return () => {
+      cancelled = true;
+    };
+  }, [previewId]);
+
   // Provider fund list (toggle)
   const [showCatalog, setShowCatalog] = useState(false);
 
-  // NEW: when provider === "other", show union of all provider tickers (deduped)
+  // When provider === "other", show union of all provider tickers (deduped)
   const allFunds = useMemo(() => {
     const merged = Object.entries(PROVIDER_FUNDS)
       .filter(([key]) => key !== "other")
@@ -421,7 +467,7 @@ export default function NewGradePage() {
     () => rows.reduce((s, r) => s + (r.weight === "" ? 0 : Number(r.weight)), 0),
     [rows]
   );
-  const canSubmit = (provider && Math.abs(total - 100) < 0.1);
+  const canSubmit = provider && Math.abs(total - 100) < 0.1;
 
   // ---- Row helpers ----
   function addRow() {
@@ -442,10 +488,7 @@ export default function NewGradePage() {
         idx === i
           ? {
               ...row,
-              [key]:
-                key === "weight"
-                  ? v === "" ? "" : Number(v)
-                  : v.toUpperCase(),
+              [key]: key === "weight" ? (v === "" ? "" : Number(v)) : v.toUpperCase(),
             }
           : row
       )
