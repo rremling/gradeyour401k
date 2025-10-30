@@ -413,11 +413,11 @@ function NewGradePageInner() {
 
     async function hydrateFromPreview(id: string) {
       try {
-        const res = await fetch(`/api/preview/get?id=${encodeURIComponent(id)}`, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-        });
+        const res = await fetch(`/api/preview/${encodeURIComponent(id)}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+    });
         if (!res.ok) throw new Error("not ok");
         const data = await res.json();
 
