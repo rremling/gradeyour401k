@@ -5,9 +5,12 @@ import { sql } from "../../../lib/db"; // adjust if your alias/path differs
 type SearchParams = { previewId?: string };
 type Holding = { symbol: string; weight: number };
 
-// ---- Starter label map (expand anytime) ----
+/* ──────────────────────────────────────────────────────────────
+   Starter label map (same vibe you liked). Expand anytime.
+   Unknown tickers still render cleanly (just the symbol).
+   ────────────────────────────────────────────────────────────── */
 const FUND_LABELS: Record<string, string> = {
-  // Fidelity
+  // Common / Fidelity
   FSKAX: "Fidelity® Total Market Index",
   FXNAX: "Fidelity® U.S. Bond Index",
   FFGCX: "Fidelity® Global Commodity Stock",
@@ -15,31 +18,33 @@ const FUND_LABELS: Record<string, string> = {
   FBND: "Fidelity® Total Bond ETF",
   FTEC: "Fidelity® MSCI Information Technology ETF",
   FREL: "Fidelity® MSCI Real Estate ETF",
+
   // Vanguard
   VOO: "Vanguard S&P 500 ETF",
   VTI: "Vanguard Total Stock Market ETF",
   BND: "Vanguard Total Bond Market ETF",
   VXUS: "Vanguard Total International Stock ETF",
   VIG: "Vanguard Dividend Appreciation ETF",
+
   // Schwab
   SCHB: "Schwab U.S. Broad Market ETF",
   SCHD: "Schwab U.S. Dividend Equity ETF",
   SCHZ: "Schwab U.S. Aggregate Bond ETF",
-  // SPDR / State Street
+
+  // SPDR
   SPY: "SPDR S&P 500 ETF Trust",
   SPLG: "SPDR Portfolio S&P 500 ETF",
-  XLU: "Utilities Select Sector SPDR",
   XLK: "Technology Select Sector SPDR",
-  // iShares / BlackRock
+  XLU: "Utilities Select Sector SPDR",
+
+  // iShares / Invesco
   IVV: "iShares Core S&P 500 ETF",
   ITOT: "iShares Core S&P Total U.S. Stock Market ETF",
   AGG: "iShares Core U.S. Aggregate Bond ETF",
   IXUS: "iShares Core MSCI Total International Stock ETF",
-  // Invesco
   QQQ: "Invesco QQQ Trust",
   SPLV: "Invesco S&P 500 Low Volatility ETF",
 };
-
 function labelFor(symRaw: string): string {
   const sym = (symRaw || "").toUpperCase().trim();
   const name = FUND_LABELS[sym];
@@ -136,19 +141,12 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-/** Compute a simple preliminary grade from holdings + profile.
- * Matches your /grade/new logic:
- * - Base by profile
- * - Penalty if weights don’t sum ~100%
- * - Clamp to [1,5] with half-star rounding
- */
+/** Compute a simple preliminary grade (matches /grade/new) */
 function computePrelimGrade(profile: string, rows: Holding[]): number {
   const total = rows.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
-  const base =
-    profile === "Growth" ? 4.3 : profile === "Balanced" ? 3.8 : 3.3;
+  const base = profile === "Growth" ? 4.3 : profile === "Balanced" ? 3.8 : 3.3;
   const penalty = Math.min(1, Math.abs(100 - total) / 100);
-  const score = Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
-  return score;
+  return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
 }
 
 export default async function ResultPage({
@@ -177,7 +175,7 @@ export default async function ResultPage({
     );
   }
 
-  // Load preview (works for uuid/bigint thanks to ::text on id)
+  // Load preview (uuid/bigint safe via ::text)
   const r = await sql(
     `SELECT id, created_at, provider, provider_display, profile, "rows", grade_base, grade_adjusted
      FROM public.previews
@@ -217,7 +215,7 @@ export default async function ResultPage({
     const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
     holdings = (arr as any[])
       .map((r) => ({
-        symbol: String(r?.symbol || "").toUpperCase(),
+        symbol: String(r?.symbol || "").toUpperCase().trim(),
         weight: Number(r?.weight || 0),
       }))
       .filter((r) => r.symbol && Number.isFinite(r.weight));
@@ -225,7 +223,7 @@ export default async function ResultPage({
     holdings = [];
   }
 
-  // Use stored grade if present; otherwise compute preliminary
+  // Grade
   const numericGrade: number | null =
     typeof p.grade_adjusted === "number"
       ? p.grade_adjusted
@@ -240,7 +238,6 @@ export default async function ResultPage({
     (s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0),
     0
   );
-
   const totalOk = Math.abs(total - 100) < 0.1;
 
   return (
@@ -255,7 +252,7 @@ export default async function ResultPage({
         </p>
       </header>
 
-      {/* Grade card */}
+      {/* Grade card — improved aesthetic you approved */}
       <section className="rounded-xl border p-6 bg-white space-y-4">
         <div className="flex items-center justify-between">
           <div className="text-3xl font-semibold">
@@ -281,7 +278,7 @@ export default async function ResultPage({
         </div>
       </section>
 
-      {/* Holdings list */}
+      {/* Holdings list with descriptions */}
       <section className="rounded-xl border p-6 bg-white">
         <h2 className="font-semibold">Your current holdings</h2>
         {holdings.length === 0 ? (
@@ -297,7 +294,9 @@ export default async function ResultPage({
                   <div className="min-w-0">
                     <div className="font-mono truncate">{labelFor(r.symbol)}</div>
                   </div>
-                  <div className="shrink-0 tabular-nums">{(Number(r.weight) || 0).toFixed(1)}%</div>
+                  <div className="shrink-0 tabular-nums">
+                    {(Number(r.weight) || 0).toFixed(1)}%
+                  </div>
                 </li>
               ))}
             </ul>
@@ -308,18 +307,7 @@ export default async function ResultPage({
         )}
       </section>
 
-      {/* What you get with the full report — concise & persuasive */}
-      <section className="rounded-xl border p-6 bg-white">
-        <h2 className="font-semibold">What you get with the full report</h2>
-        <ul className="list-disc list-inside text-sm text-gray-800 mt-2 space-y-1">
-          <li><strong>Clear actions</strong> to increase, decrease, or replace specific funds.</li>
-          <li><strong>Model match</strong> to a curated ETF allocation for your profile.</li>
-          <li><strong>Market-aware tilt</strong> using SPY 30/50/100/200-day trend.</li>
-          <li><strong>Polished PDF</strong> delivered to your inbox—ready to implement or share.</li>
-        </ul>
-      </section>
-
-      {/* CTA buttons */}
+      {/* CTA buttons (unchanged) */}
       <div className="flex flex-col sm:flex-row gap-3">
         <Link
           href="/pricing"
