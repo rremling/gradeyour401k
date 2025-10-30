@@ -65,14 +65,13 @@ const PROVIDER_FUNDS: Record<string, string[]> = {
 /** ─────────────────────────────────────────────────────────────────
  *  FUND_LABELS: starter set (safe fallbacks if not found).
  *  Add more tickers anytime; unknown tickers show just the symbol.
- *  Tip: keep labels short (no share-class clutter) for clean UI.
  *  ───────────────────────────────────────────────────────────────── */
 const FUND_LABELS: Record<string, string> = {
-  // ---- Common user-entered extras (even if not in catalogs)
+  // Common extras
   FSKAX: "Fidelity® Total Market Index",
   FXNAX: "Fidelity® U.S. Bond Index",
 
-  // ---- Fidelity (curated subset)
+  // Fidelity (subset)
   FFGCX: "Fidelity® Global Commodity Stock",
   FSELX: "Fidelity® Select Semiconductors",
   FSPHX: "Fidelity® Select Health Care",
@@ -111,13 +110,12 @@ const FUND_LABELS: Record<string, string> = {
   FBCG:  "Fidelity® Blue Chip Growth ETF",
   FBCV:  "Fidelity® Blue Chip Value ETF",
   FDVV:  "Fidelity® High Dividend ETF",
-  // (Placeholders if you want to show something instead of the raw symbol)
   FSLG:  "Fidelity® (label TBD)",
   FIDSX: "Fidelity® (label TBD)",
   FBANK: "Fidelity® (label TBD)",
   FDLSX: "Fidelity® (label TBD)",
 
-  // ---- Vanguard (curated subset)
+  // Vanguard (subset)
   VOO:   "Vanguard S&P 500 ETF",
   VFIAX: "Vanguard 500 Index Fund Admiral",
   VTI:   "Vanguard Total Stock Market ETF",
@@ -165,7 +163,7 @@ const FUND_LABELS: Record<string, string> = {
   VIGI:  "Vanguard Intl Dividend Appreciation ETF",
   VYMI:  "Vanguard Intl High Dividend Yield ETF",
 
-  // ---- Schwab (curated subset)
+  // Schwab (subset)
   SCHB:  "Schwab U.S. Broad Market ETF",
   SCHX:  "Schwab U.S. Large-Cap ETF",
   SCHG:  "Schwab U.S. Large-Cap Growth ETF",
@@ -188,7 +186,7 @@ const FUND_LABELS: Record<string, string> = {
   SMBS:  "Schwab (label TBD)",
   SCUS:  "Schwab (label TBD)",
 
-  // ---- State Street / SPDR (curated subset)
+  // State Street / SPDR (subset)
   SPY:   "SPDR S&P 500 ETF Trust",
   SPLG:  "SPDR Portfolio S&P 500 ETF",
   SPMD:  "SPDR Portfolio Mid Cap ETF",
@@ -206,7 +204,7 @@ const FUND_LABELS: Record<string, string> = {
   XLB:   "Materials Select Sector SPDR",
   XLU:   "Utilities Select Sector SPDR",
   XBI:   "SPDR S&P Biotech ETF",
-  SPHD:  "Invesco S&P 500 High Dividend Low Vol (SPDR list contains SPHD reference)",
+  SPHD:  "Invesco S&P 500 High Dividend Low Volatility ETF",
   SPIP:  "SPDR Portfolio TIPS ETF",
   SPHY:  "SPDR Portfolio High Yield Bond ETF",
   STOT:  "SPDR DoubleLine Short Term Total Return",
@@ -217,7 +215,7 @@ const FUND_LABELS: Record<string, string> = {
   MDY:   "SPDR S&P MidCap 400 ETF Trust",
   DIA:   "SPDR Dow Jones Industrial Average ETF Trust",
 
-  // ---- BlackRock / iShares (curated subset)
+  // BlackRock / iShares (subset)
   IVV:   "iShares Core S&P 500 ETF",
   ITOT:  "iShares Core S&P Total U.S. Stock Market ETF",
   IEMG:  "iShares Core MSCI Emerging Markets ETF",
@@ -233,8 +231,8 @@ const FUND_LABELS: Record<string, string> = {
   IMTB:  "iShares Core 5-10 Year USD Bond ETF",
   IXUS:  "iShares Core MSCI Total International Stock ETF",
   IWB:   "iShares Russell 1000 ETF",
-  IVE:   "iShares S&P 500 Value ETF / Russell 1000 Value (commonly IWD/IVE)",
-  IVW:   "iShares S&P 500 Growth ETF / Russell 1000 Growth (commonly IWF/IVW)",
+  IVE:   "iShares S&P 500 Value ETF",
+  IVW:   "iShares S&P 500 Growth ETF",
   IWD:   "iShares Russell 1000 Value ETF",
   DVY:   "iShares Select Dividend ETF",
   DIVB:  "iShares U.S. Dividend and Buyback ETF",
@@ -245,7 +243,7 @@ const FUND_LABELS: Record<string, string> = {
   IYE:   "iShares U.S. Energy ETF",
   IXJ:   "iShares Global Healthcare ETF",
 
-  // ---- Invesco (curated subset)
+  // Invesco (subset)
   QQQ:   "Invesco QQQ Trust",
   QQQM:  "Invesco NASDAQ-100 ETF",
   SPHQ:  "Invesco S&P 500 Quality ETF",
@@ -260,13 +258,13 @@ const FUND_LABELS: Record<string, string> = {
   PSCT:  "Invesco S&P SmallCap Info Tech ETF",
   SPHD:  "Invesco S&P 500 High Dividend Low Volatility ETF",
   XMMO:  "Invesco S&P MidCap Momentum ETF",
-  XMVM:  "Invesco S&P MidCap Value with Momentum ETF",
+  XMVM:  "Invesco S&P MidCap Value w/ Momentum ETF",
   XMHQ:  "Invesco S&P MidCap Quality ETF",
   SPHB:  "Invesco S&P 500 High Beta ETF",
   PSR:   "Invesco Active U.S. Real Estate ETF",
   CSD:   "Invesco Spin-Off ETF",
 
-  // ---- Voya (examples — many share classes exist; keep generic)
+  // Voya (examples)
   IIFIX: "Voya International Index (I)",
   IOSIX: "Voya Small Cap Opportunities (I)",
   IIGZX: "Voya Growth & Income (R6)",
@@ -274,7 +272,6 @@ const FUND_LABELS: Record<string, string> = {
   IIVGX: "Voya Intermediate Bond (I)",
   IRGIX: "Voya Global Real Estate (I)",
   IVRIX: "Voya Real Estate (I)",
-  // Add more Voya tickers here as you confirm exact share-class names…
 };
 
 // Prefer “TICKER — Name”, fall back to just ticker if unknown
@@ -396,7 +393,20 @@ export default function NewGradePage() {
 
   // Provider fund list (toggle)
   const [showCatalog, setShowCatalog] = useState(false);
-  const providerList = useMemo(() => (PROVIDER_FUNDS[provider] || []), [provider]);
+
+  // NEW: when provider === "other", show union of all provider tickers (deduped)
+  const allFunds = useMemo(() => {
+    const merged = Object.entries(PROVIDER_FUNDS)
+      .filter(([key]) => key !== "other")
+      .flatMap(([, arr]) => arr);
+    return Array.from(new Set(merged));
+  }, []);
+
+  const providerList = useMemo(
+    () => (provider === "other" ? allFunds : (PROVIDER_FUNDS[provider] || [])),
+    [provider, allFunds]
+  );
+
   const [selectedFromList, setSelectedFromList] = useState<string>("");
 
   // Derived for autocomplete
@@ -448,7 +458,6 @@ export default function NewGradePage() {
       profileInput === "Growth" ? 4.3 : profileInput === "Balanced" ? 3.8 : 3.3;
     const penalty = Math.min(1, Math.abs(100 - totalWeight) / 100);
     return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
-    // ^ rounds to nearest 0.5
   }
 
   // ---- Save preview → results ----
