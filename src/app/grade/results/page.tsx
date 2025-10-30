@@ -5,53 +5,65 @@ import { sql } from "../../../lib/db"; // adjust if your alias/path differs
 type SearchParams = { previewId?: string };
 type Holding = { symbol: string; weight: number };
 
-/* ──────────────────────────────────────────────────────────────
-   Starter label map (same vibe you liked). Expand anytime.
-   Unknown tickers still render cleanly (just the symbol).
-   ────────────────────────────────────────────────────────────── */
+// ───────────────────────── Label helpers (starter set) ─────────────────────────
 const FUND_LABELS: Record<string, string> = {
-  // Common / Fidelity
+  // Common “new page” defaults the user often enters
   FSKAX: "Fidelity® Total Market Index",
   FXNAX: "Fidelity® U.S. Bond Index",
-  FFGCX: "Fidelity® Global Commodity Stock",
+
+  // Fidelity (subset)
   FXAIX: "Fidelity® 500 Index",
   FBND: "Fidelity® Total Bond ETF",
+  FNCL: "Fidelity® MSCI Financials ETF",
   FTEC: "Fidelity® MSCI Information Technology ETF",
+  FHLC: "Fidelity® MSCI Health Care ETF",
+  FDIS: "Fidelity® MSCI Consumer Discretionary ETF",
+  FSTA: "Fidelity® MSCI Consumer Staples ETF",
+  FENY: "Fidelity® MSCI Energy ETF",
   FREL: "Fidelity® MSCI Real Estate ETF",
 
-  // Vanguard
+  // Vanguard (subset)
   VOO: "Vanguard S&P 500 ETF",
   VTI: "Vanguard Total Stock Market ETF",
-  BND: "Vanguard Total Bond Market ETF",
   VXUS: "Vanguard Total International Stock ETF",
-  VIG: "Vanguard Dividend Appreciation ETF",
+  BND: "Vanguard Total Bond Market ETF",
+  VNQ: "Vanguard Real Estate ETF",
+  VGT: "Vanguard Information Technology ETF",
+  VHT: "Vanguard Health Care ETF",
+  VYM: "Vanguard High Dividend Yield ETF",
 
-  // Schwab
+  // Schwab (subset)
   SCHB: "Schwab U.S. Broad Market ETF",
-  SCHD: "Schwab U.S. Dividend Equity ETF",
+  SCHX: "Schwab U.S. Large-Cap ETF",
   SCHZ: "Schwab U.S. Aggregate Bond ETF",
+  SCHD: "Schwab U.S. Dividend Equity ETF",
+  SCHH: "Schwab U.S. REIT ETF",
 
-  // SPDR
+  // SPDR / State Street (subset)
   SPY: "SPDR S&P 500 ETF Trust",
   SPLG: "SPDR Portfolio S&P 500 ETF",
   XLK: "Technology Select Sector SPDR",
+  XLF: "Financial Select Sector SPDR",
   XLU: "Utilities Select Sector SPDR",
 
-  // iShares / Invesco
+  // iShares / BlackRock (subset)
   IVV: "iShares Core S&P 500 ETF",
   ITOT: "iShares Core S&P Total U.S. Stock Market ETF",
+  IEFA: "iShares Core MSCI EAFE ETF",
+  IEMG: "iShares Core MSCI Emerging Markets ETF",
   AGG: "iShares Core U.S. Aggregate Bond ETF",
-  IXUS: "iShares Core MSCI Total International Stock ETF",
+
+  // Invesco (subset)
   QQQ: "Invesco QQQ Trust",
   SPLV: "Invesco S&P 500 Low Volatility ETF",
 };
-function labelFor(symRaw: string): string {
-  const sym = (symRaw || "").toUpperCase().trim();
-  const name = FUND_LABELS[sym];
-  return name ? `${sym} — ${name}` : sym;
+function labelFor(sym: string): string {
+  const s = (sym || "").toUpperCase().trim();
+  const name = FUND_LABELS[s];
+  return name ? `${s} — ${name}` : s;
 }
 
-// ---- Stepper (mobile-friendly) ----
+// ───────────────────────── Stepper (mobile-friendly) ─────────────────────────
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -141,12 +153,50 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-/** Compute a simple preliminary grade (matches /grade/new) */
+/** Compute a simple preliminary grade from holdings + profile.
+ * Matches the lightweight logic used on the grade page:
+ * - Base by profile
+ * - Penalty if weights don’t sum ~100%
+ * - Penalty for concentration (largest position > 60%)
+ * - Clamp to [1,5] with half-star rounding
+ */
 function computePrelimGrade(profile: string, rows: Holding[]): number {
-  const total = rows.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
-  const base = profile === "Growth" ? 4.3 : profile === "Balanced" ? 3.8 : 3.3;
-  const penalty = Math.min(1, Math.abs(100 - total) / 100);
-  return Math.max(1, Math.min(5, Math.round((base - penalty) * 2) / 2));
+  const weights = rows.map((r) => (Number.isFinite(r.weight) ? r.weight : 0));
+  const total = weights.reduce((s, n) => s + n, 0);
+
+  let base =
+    profile === "Aggressive Growth" ? 4.5 : profile === "Balanced" ? 3.8 : 4.1;
+
+  // Penalize if not around 100%
+  const off = Math.abs(100 - total);
+  if (off > 0.25) {
+    const p = Math.min(1, off / 100); // max -1.0
+    base -= p;
+  }
+
+  // Penalize high concentration
+  const maxWt = Math.max(0, ...weights);
+  if (maxWt > 60) base -= 0.2;
+
+  // Clamp and half-star round
+  const score = Math.max(1, Math.min(5, Math.round(base * 2) / 2));
+  return score;
+}
+
+function Stars({ value }: { value: number }) {
+  // Renders 5 stars with half-step fill via overlay width
+  const pct = Math.max(0, Math.min(100, (value / 5) * 100));
+  return (
+    <div className="relative inline-block align-middle" aria-label={`${value.toFixed(1)} out of 5`}>
+      <div className="text-3xl text-gray-300 tracking-[2px] select-none">★★★★★</div>
+      <div
+        className="absolute left-0 top-0 h-full overflow-hidden"
+        style={{ width: `${pct}%` }}
+      >
+        <div className="text-3xl text-yellow-500 tracking-[2px] select-none">★★★★★</div>
+      </div>
+    </div>
+  );
 }
 
 export default async function ResultPage({
@@ -175,7 +225,7 @@ export default async function ResultPage({
     );
   }
 
-  // Load preview (uuid/bigint safe via ::text)
+  // Supports UUID or bigint ids by casting to text
   const r = await sql(
     `SELECT id, created_at, provider, provider_display, profile, "rows", grade_base, grade_adjusted
      FROM public.previews
@@ -204,7 +254,6 @@ export default async function ResultPage({
     );
   }
 
-  const idText = String(p.id);
   const providerDisplay: string = p.provider_display || p.provider || "—";
   const profile: string = p.profile || "—";
 
@@ -215,15 +264,15 @@ export default async function ResultPage({
     const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
     holdings = (arr as any[])
       .map((r) => ({
-        symbol: String(r?.symbol || "").toUpperCase().trim(),
-        weight: Number(r?.weight || 0),
+        symbol: String(r.symbol || "").toUpperCase(),
+        weight: Number(r.weight || 0),
       }))
       .filter((r) => r.symbol && Number.isFinite(r.weight));
   } catch {
     holdings = [];
   }
 
-  // Grade
+  // Use stored grade if present; otherwise compute preliminary from holdings/profile
   const numericGrade: number | null =
     typeof p.grade_adjusted === "number"
       ? p.grade_adjusted
@@ -234,94 +283,121 @@ export default async function ResultPage({
       : null;
 
   const grade = numericGrade !== null ? numericGrade.toFixed(1) : "—";
+  const gradeNum = numericGrade ?? 0;
   const total = holdings.reduce(
     (s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0),
     0
   );
-  const totalOk = Math.abs(total - 100) < 0.1;
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
       <Stepper current={2} />
 
-      <header className="space-y-2">
-        <h1 className="text-2xl font-bold">Your Grade</h1>
-        <p className="text-gray-600">
-          Provider: <span className="font-medium">{providerDisplay}</span> ·{" "}
-          Profile: <span className="font-medium">{profile}</span>
+      {/* Hero header with subtle gradient */}
+      <header className="rounded-xl p-6 bg-gradient-to-br from-blue-600/10 to-emerald-500/10 border">
+        <h1 className="text-2xl font-bold">Your 401(k) Grade</h1>
+        <p className="text-gray-700 mt-1">
+          Provider: <span className="font-medium">{providerDisplay}</span>{" "}
+          · Profile: <span className="font-medium">{profile}</span>
         </p>
       </header>
 
-      {/* Grade card — improved aesthetic you approved */}
-      <section className="rounded-xl border p-6 bg-white space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="text-3xl font-semibold">
-            ⭐ <span className="align-middle">{grade}</span>{" "}
-            <span className="text-base align-middle text-gray-500">/ 5</span>
+      {/* Grade card */}
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-3">
+              <Stars value={gradeNum} />
+              <div className="text-3xl font-semibold">{grade} / 5</div>
+            </div>
+            <p className="text-sm text-gray-600 mt-2">
+              This preliminary grade reflects your current mix and concentration.
+              Your optimized report can lift your plan toward a{" "}
+              <span className="font-semibold text-blue-700">5-Star</span> allocation
+              with clear, step-by-step adjustments.
+            </p>
           </div>
-          {!totalOk && (
-            <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">
-              Weights should total 100% (currently {total.toFixed(1)}%)
-            </span>
-          )}
-        </div>
-        <p className="text-sm text-gray-600">
-          This is a preliminary grade. Upgrade to the{" "}
-          <span className="font-medium">optimized PDF report</span> to see:
-          model match vs. your holdings, market-cycle tilt, and precise
-          increase/decrease actions by fund.
-        </p>
-        <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-sm">
-          <span className="font-semibold text-blue-800">Make your 401(k) 5-Stars:</span>{" "}
-          get an <span className="font-medium">Optimized Report</span> with step-by-step
-          changes you can implement today.
+          <div className="text-right hidden sm:block">
+            {/* Total weight meter */}
+            <div className="text-xs text-gray-600 mb-1">Total allocation</div>
+            <div className="w-44 h-2 rounded-full bg-gray-200 overflow-hidden">
+              <div
+                className={`h-full ${Math.abs(100 - total) < 0.1 ? "bg-emerald-500" : "bg-yellow-500"}`}
+                style={{ width: `${Math.min(100, Math.max(0, total))}%` }}
+              />
+            </div>
+            <div className="text-xs text-gray-600 mt-1">{total.toFixed(1)}% (target 100%)</div>
+          </div>
         </div>
       </section>
 
       {/* Holdings list with descriptions */}
-      <section className="rounded-xl border p-6 bg-white">
-        <h2 className="font-semibold">Your current holdings</h2>
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Your current holdings</h2>
+          <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+            {holdings.length} fund{holdings.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
         {holdings.length === 0 ? (
           <p className="text-sm text-gray-600 mt-2">No holdings to display.</p>
         ) : (
-          <>
-            <ul className="mt-3 text-sm text-gray-800 space-y-2">
-              {holdings.map((r, idx) => (
-                <li
-                  key={`${r.symbol}-${idx}`}
-                  className="flex items-center justify-between gap-3"
-                >
+          <ul className="mt-3 text-sm text-gray-800 divide-y">
+            {holdings.map((r, idx) => {
+              const sym = (r.symbol || "").toUpperCase().trim();
+              const desc = FUND_LABELS[sym]; // normalized lookup so known labels show up
+              return (
+                <li key={`${r.symbol}-${idx}`} className="py-2 flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="font-mono truncate">{labelFor(r.symbol)}</div>
+                    <div className="font-mono font-medium">{r.symbol}</div>
+                    <div className="text-xs text-gray-600 truncate" title={labelFor(r.symbol)}>
+                      {desc ?? " "}
+                    </div>
                   </div>
-                  <div className="shrink-0 tabular-nums">
-                    {(Number(r.weight) || 0).toFixed(1)}%
-                  </div>
+                  <div className="shrink-0 font-medium">{(Number(r.weight) || 0).toFixed(1)}%</div>
                 </li>
-              ))}
-            </ul>
-            <div className="mt-3 text-xs text-gray-500">
-              Total: {total.toFixed(1)}%
-            </div>
-          </>
+              );
+            })}
+          </ul>
         )}
+
+        <div className="mt-2 text-xs text-gray-500">Total: {total.toFixed(1)}%</div>
       </section>
 
-      {/* CTA buttons (unchanged) */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <Link
-          href="/pricing"
-          className="inline-flex items-center justify-center rounded-lg bg-blue-600 text-white px-5 py-2 hover:bg-blue-700"
-        >
-          Buy full report
-        </Link>
-        <Link
-          href={`/grade/new?previewId=${encodeURIComponent(idText)}`}
-          className="inline-flex items-center justify-center rounded-lg border px-5 py-2 hover:bg-gray-50"
-        >
-          Edit inputs
-        </Link>
-      </div>
+      {/* Value prop + CTA */}
+      <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <h2 className="font-semibold">Make it 5-Stars with an Optimized Report</h2>
+        <p className="text-sm text-gray-700 mt-2">
+          Get a personalized PDF with{" "}
+          <span className="font-medium">exact increase/decrease actions</span>, a
+          <span className="font-medium"> model match</span> for your profile, and a
+          <span className="font-medium"> market-aware tilt</span> so you can implement confidently.
+        </p>
+        <ul className="list-disc list-inside text-sm text-gray-800 mt-3 space-y-1">
+          <li>Specific fund changes to reach the target allocation</li>
+          <li>Side-by-side comparison vs. a curated model</li>
+          <li>Clear next steps—no guesswork</li>
+        </ul>
+        <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          <Link
+            href="/pricing"
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 text-white px-5 py-2.5 hover:bg-blue-700"
+          >
+            Buy optimized report
+          </Link>
+          {/* NOTE: we pass previewId through so the edit page can hydrate the form later */}
+          <Link
+            href={`/grade/new?previewId=${encodeURIComponent(previewId)}`}
+            className="inline-flex items-center justify-center rounded-lg border px-5 py-2.5 hover:bg-gray-50"
+          >
+            Edit inputs
+          </Link>
+        </div>
+        <p className="text-xs text-gray-500 mt-2">
+          You can revisit and tweak your entries—your preview is linked above.
+        </p>
+      </section>
     </main>
   );
 }
