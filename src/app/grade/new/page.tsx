@@ -104,7 +104,6 @@ function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
           );
         })}
       </ol>
-
       {/* Full labels with horizontal scroll if needed */}
       <div className="hidden sm:block">
         <div className="-mx-3 overflow-x-auto overscroll-x-contain">
