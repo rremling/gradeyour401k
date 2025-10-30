@@ -17,6 +17,9 @@ type ClientRow = {
   client_notes: string | null;
   stripe_customer_id: string | null;
   latest_preview_id: string | null;
+
+  // NEW: surfaced by /api/admin/clients for statements
+  last_statement_uploaded_at?: string | null; // ISO timestamp or YYYY-MM-DD
 };
 
 const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
@@ -29,11 +32,25 @@ const US_STATES = [
 ] as const;
 const COMMS_PREFS = ["email", "phone_email"] as const;
 
+function fmtDate(d?: string | null) {
+  if (!d) return "—";
+  try {
+    // supports "YYYY-MM-DD" or ISO
+    const dt = d.length <= 10 ? new Date(d + "T00:00:00Z") : new Date(d);
+    return dt.toLocaleDateString();
+  } catch {
+    return d;
+  }
+}
+
 export default function AdminLoginClient() {
   const router = useRouter();
   const sp = useSearchParams();
   const rawReturnTo = sp.get("returnTo") || "/admin/orders";
-  const returnTo = typeof rawReturnTo === "string" && rawReturnTo.startsWith("/") ? rawReturnTo : "/admin/orders";
+  const returnTo =
+    typeof rawReturnTo === "string" && rawReturnTo.startsWith("/")
+      ? rawReturnTo
+      : "/admin/orders";
 
   const [token, setToken] = useState("");
   const [err, setErr] = useState<string | null>(null);
@@ -52,7 +69,7 @@ export default function AdminLoginClient() {
   const visibleRows = useMemo(() => {
     if (!search.trim()) return rows;
     const q = search.trim().toLowerCase();
-    return rows.filter(r => r.email.toLowerCase().includes(q));
+    return rows.filter((r) => r.email.toLowerCase().includes(q));
   }, [rows, search]);
 
   useEffect(() => {
@@ -134,11 +151,11 @@ export default function AdminLoginClient() {
   }
 
   function getDraft(email: string): ClientRow {
-    return drafts[email] || rows.find(r => r.email === email)!;
+    return drafts[email] || rows.find((r) => r.email === email)!;
   }
 
   function setDraft(email: string, patch: Partial<ClientRow>) {
-    setDrafts(prev => ({
+    setDrafts((prev) => ({
       ...prev,
       [email]: { ...getDraft(email), ...patch },
     }));
@@ -182,6 +199,14 @@ export default function AdminLoginClient() {
     router.refresh();
   }
 
+  /* ---------------------- Statement helpers ---------------------- */
+
+  function latestStatementUrl(email: string) {
+    // Assumes you’ll add a server route that returns the latest statement (bytea) as a file attachment
+    // e.g. GET /api/admin/statements/latest?email=...
+    return `/api/admin/statements/latest?email=${encodeURIComponent(email)}`;
+  }
+
   /* ---------------------- Views ---------------------- */
 
   if (!authed) {
@@ -202,7 +227,11 @@ export default function AdminLoginClient() {
             />
           </div>
 
-          {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{err}</div>}
+          {err && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+              {err}
+            </div>
+          )}
 
           <button
             type="submit"
@@ -230,7 +259,9 @@ export default function AdminLoginClient() {
             placeholder="Search email…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") reloadClients(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") reloadClients();
+            }}
           />
           <button
             className="rounded-md border px-3 py-2 text-sm hover:bg-gray-50"
@@ -248,209 +279,282 @@ export default function AdminLoginClient() {
         </div>
       </header>
 
-      {err && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{err}</div>}
+      {err && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">
+          {err}
+        </div>
+      )}
 
-      <div className="overflow-x-auto border rounded-lg bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-slate-700">
-            <tr>
-              <th className="text-left px-3 py-2">Email</th>
-              <th className="text-left px-3 py-2">Provider</th>
-              <th className="text-left px-3 py-2">Profile</th>
-              <th className="text-left px-3 py-2">Planned Year</th>
-              <th className="text-left px-3 py-2">Employer</th>
-              <th className="text-left px-3 py-2">Income</th>
-              <th className="text-left px-3 py-2">State</th>
-              <th className="text-left px-3 py-2">Comms</th>
-              <th className="text-left px-3 py-2">Last Review</th>
-              <th className="text-left px-3 py-2">Notes</th>
-              <th className="text-left px-3 py-2">Actions</th>
-              <th className="text-left px-3 py-2">Stripe</th>
-              <th className="text-left px-3 py-2">Latest PDF</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.length === 0 && (
+      {/* Container prevents page-level horizontal overflow */}
+      <div className="border rounded-lg bg-white overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full table-fixed text-sm">
+            <colgroup>
+              {/* Set sane widths to avoid horizontal overflow */}
+              <col className="w-[220px]" />  {/* Email */}
+              <col className="w-[120px]" />  {/* Provider */}
+              <col className="w-[130px]" />  {/* Profile */}
+              <col className="w-[110px]" />  {/* Planned Year */}
+              <col className="w-[150px]" />  {/* Employer */}
+              <col className="w-[120px]" />  {/* Income */}
+              <col className="w-[90px]" />   {/* State */}
+              <col className="w-[130px]" />  {/* Comms */}
+              <col className="w-[150px]" />  {/* Last Review */}
+              <col className="w-[220px]" />  {/* Notes */}
+              <col className="w-[110px]" />  {/* Actions */}
+              <col className="w-[90px]" />   {/* Stripe */}
+              <col className="w-[120px]" />  {/* Latest PDF */}
+              <col className="w-[170px]" />  {/* NEW: Statement */}
+            </colgroup>
+            <thead className="bg-gray-50 text-slate-700">
               <tr>
-                <td colSpan={13} className="px-3 py-8 text-center text-slate-500">
-                  {isFetching ? "Loading…" : "No clients found."}
-                </td>
+                <th className="text-left px-3 py-2">Email</th>
+                <th className="text-left px-3 py-2">Provider</th>
+                <th className="text-left px-3 py-2">Profile</th>
+                <th className="text-left px-3 py-2">Planned Year</th>
+                <th className="text-left px-3 py-2">Employer</th>
+                <th className="text-left px-3 py-2">Income</th>
+                <th className="text-left px-3 py-2">State</th>
+                <th className="text-left px-3 py-2">Comms</th>
+                <th className="text-left px-3 py-2">Last Review</th>
+                <th className="text-left px-3 py-2">Notes</th>
+                <th className="text-left px-3 py-2">Actions</th>
+                <th className="text-left px-3 py-2">Stripe</th>
+                <th className="text-left px-3 py-2">Latest PDF</th>
+                <th className="text-left px-3 py-2">Statement</th> {/* NEW */}
               </tr>
-            )}
-            {visibleRows.map((r) => {
-              const d = getDraft(r.email);
-              const stripeUrl = r.stripe_customer_id
-                ? `https://dashboard.stripe.com/customers/${r.stripe_customer_id}`
-                : null;
-              const pdfUrl = r.latest_preview_id
-                ? `/api/report/pdf?previewId=${encodeURIComponent(r.latest_preview_id)}`
-                : null;
-
-              return (
-                <tr key={r.email} className="border-t align-top">
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{r.email}</div>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <select
-                      className="border rounded px-2 py-1 bg-white"
-                      value={d.provider || ""}
-                      onChange={(e) => setDraft(r.email, { provider: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      {PROVIDERS.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <select
-                      className="border rounded px-2 py-1 bg-white"
-                      value={d.profile || ""}
-                      onChange={(e) => setDraft(r.email, { profile: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      {PROFILES.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      className="border rounded px-2 py-1 w-24"
-                      value={d.planned_retirement_year ?? ""}
-                      onChange={(e) => setDraft(r.email, { planned_retirement_year: e.target.value ? Number(e.target.value) : null })}
-                    />
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <input
-                      type="text"
-                      className="border rounded px-2 py-1 w-44"
-                      value={d.employer || ""}
-                      onChange={(e) => setDraft(r.email, { employer: e.target.value })}
-                      placeholder="Employer"
-                    />
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <select
-                      className="border rounded px-2 py-1 bg-white"
-                      value={d.income_band || ""}
-                      onChange={(e) => setDraft(r.email, { income_band: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      {INCOME_BANDS.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <select
-                      className="border rounded px-2 py-1 bg-white"
-                      value={d.state || ""}
-                      onChange={(e) => setDraft(r.email, { state: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <select
-                      className="border rounded px-2 py-1 bg-white"
-                      value={d.comms_pref || ""}
-                      onChange={(e) => setDraft(r.email, { comms_pref: e.target.value })}
-                    >
-                      <option value="">—</option>
-                      {COMMS_PREFS.map(c => (
-                        <option key={c} value={c}>
-                          {c === "email" ? "Email" : "Phone + Email"}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="date"
-                        className="border rounded px-2 py-1"
-                        value={d.last_advisor_review_at || ""}
-                        onChange={(e) => setDraft(r.email, { last_advisor_review_at: e.target.value || null })}
-                      />
-                      <button
-                        className="text-xs rounded border px-2 py-1 hover:bg-gray-50"
-                        onClick={() => markToday(r.email)}
-                        type="button"
-                        title="Set to today"
-                      >
-                        Today
-                      </button>
-                    </div>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <textarea
-                      className="border rounded px-2 py-1 w-64 h-16"
-                      value={d.client_notes || ""}
-                      onChange={(e) => setDraft(r.email, { client_notes: e.target.value })}
-                      placeholder="Notes..."
-                    />
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <div className="flex flex-col gap-2">
-                      <button
-                        className="rounded bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 disabled:opacity-50"
-                        onClick={() => saveRow(r.email)}
-                        disabled={saveBusy === r.email}
-                        type="button"
-                      >
-                        {saveBusy === r.email ? "Saving…" : "Save"}
-                      </button>
-                      {justSavedEmail === r.email && (
-                        <span className="inline-flex items-center gap-1 text-green-700 text-xs">
-                          <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-                          Saved!
-                        </span>
-                      )}
-                    </div>
-                  </td>
-
-                  <td className="px-3 py-2">
-                    {stripeUrl ? (
-                      <a
-                        href={stripeUrl}
-                        target="_blank"
-                        className="text-blue-600 hover:underline"
-                        title="Open in Stripe Dashboard"
-                      >
-                        Open
-                      </a>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </td>
-
-                  <td className="px-3 py-2">
-                    {pdfUrl ? (
-                      <a
-                        href={pdfUrl}
-                        target="_blank"
-                        className="text-blue-600 hover:underline"
-                        title="Open latest PDF"
-                      >
-                        Open
-                      </a>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
+            </thead>
+            <tbody>
+              {visibleRows.length === 0 && (
+                <tr>
+                  <td colSpan={14} className="px-3 py-8 text-center text-slate-500">
+                    {isFetching ? "Loading…" : "No clients found."}
                   </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+
+              {visibleRows.map((r) => {
+                const d = getDraft(r.email);
+                const stripeUrl = r.stripe_customer_id
+                  ? `https://dashboard.stripe.com/customers/${r.stripe_customer_id}`
+                  : null;
+                const pdfUrl = r.latest_preview_id
+                  ? `/api/report/pdf?previewId=${encodeURIComponent(r.latest_preview_id)}`
+                  : null;
+                const stmtUrl = latestStatementUrl(r.email);
+                const stmtDate = fmtDate(r.last_statement_uploaded_at ?? null);
+
+                return (
+                  <tr key={r.email} className="border-t align-top">
+                    <td className="px-3 py-2">
+                      <div className="font-medium truncate">{r.email}</div>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <select
+                        className="border rounded px-2 py-1 bg-white w-full"
+                        value={d.provider || ""}
+                        onChange={(e) => setDraft(r.email, { provider: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {PROVIDERS.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <select
+                        className="border rounded px-2 py-1 bg-white w-full"
+                        value={d.profile || ""}
+                        onChange={(e) => setDraft(r.email, { profile: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {PROFILES.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        className="border rounded px-2 py-1 w-full"
+                        value={d.planned_retirement_year ?? ""}
+                        onChange={(e) =>
+                          setDraft(r.email, {
+                            planned_retirement_year: e.target.value
+                              ? Number(e.target.value)
+                              : null,
+                          })
+                        }
+                      />
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <input
+                        type="text"
+                        className="border rounded px-2 py-1 w-full"
+                        value={d.employer || ""}
+                        onChange={(e) => setDraft(r.email, { employer: e.target.value })}
+                        placeholder="Employer"
+                      />
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <select
+                        className="border rounded px-2 py-1 bg-white w-full"
+                        value={d.income_band || ""}
+                        onChange={(e) => setDraft(r.email, { income_band: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {INCOME_BANDS.map((b) => (
+                          <option key={b} value={b}>
+                            {b}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <select
+                        className="border rounded px-2 py-1 bg-white w-full"
+                        value={d.state || ""}
+                        onChange={(e) => setDraft(r.email, { state: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {US_STATES.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <select
+                        className="border rounded px-2 py-1 bg-white w-full"
+                        value={d.comms_pref || ""}
+                        onChange={(e) => setDraft(r.email, { comms_pref: e.target.value })}
+                      >
+                        <option value="">—</option>
+                        {COMMS_PREFS.map((c) => (
+                          <option key={c} value={c}>
+                            {c === "email" ? "Email" : "Phone + Email"}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="date"
+                          className="border rounded px-2 py-1 w-full"
+                          value={d.last_advisor_review_at || ""}
+                          onChange={(e) =>
+                            setDraft(r.email, {
+                              last_advisor_review_at: e.target.value || null,
+                            })
+                          }
+                        />
+                        <button
+                          className="text-xs rounded border px-2 py-1 hover:bg-gray-50"
+                          onClick={() => markToday(r.email)}
+                          type="button"
+                          title="Set to today"
+                        >
+                          Today
+                        </button>
+                      </div>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <textarea
+                        className="border rounded px-2 py-1 w-full h-16 resize-y"
+                        value={d.client_notes || ""}
+                        onChange={(e) =>
+                          setDraft(r.email, { client_notes: e.target.value })
+                        }
+                        placeholder="Notes..."
+                      />
+                    </td>
+
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-2">
+                        <button
+                          className="rounded bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 disabled:opacity-50"
+                          onClick={() => saveRow(r.email)}
+                          disabled={saveBusy === r.email}
+                          type="button"
+                        >
+                          {saveBusy === r.email ? "Saving…" : "Save"}
+                        </button>
+                        {justSavedEmail === r.email && (
+                          <span className="inline-flex items-center gap-1 text-green-700 text-xs">
+                            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                            Saved!
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {stripeUrl ? (
+                        <a
+                          href={stripeUrl}
+                          target="_blank"
+                          className="text-blue-600 hover:underline"
+                          title="Open in Stripe Dashboard"
+                        >
+                          Open
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+
+                    <td className="px-3 py-2">
+                      {pdfUrl ? (
+                        <a
+                          href={pdfUrl}
+                          target="_blank"
+                          className="text-blue-600 hover:underline"
+                          title="Open latest PDF"
+                        >
+                          Open
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+
+                    {/* NEW: Statements column */}
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        <div className="text-xs text-slate-500">
+                          Last: <span className="font-medium">{stmtDate}</span>
+                        </div>
+                        <a
+                          href={stmtUrl}
+                          className="inline-flex justify-center rounded border px-2 py-1 text-xs hover:bg-gray-50"
+                          title="Download latest statement"
+                          target="_blank"
+                        >
+                          Download latest
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <p className="text-xs text-slate-500">
