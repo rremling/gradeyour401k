@@ -35,12 +35,14 @@ const COMMS_PREFS = ["email", "phone_email"] as const;
 function fmtDate(d?: string | null) {
   if (!d) return "—";
   try {
-    const dt = d.length <= 10 ? new Date(d + "T00:00:00Z") : new Date(d);
-    return dt.toLocaleDateString();
+    // Handle both "YYYY-MM-DD" and full ISO strings
+    const [y, m, day] = d.length > 10 ? d.slice(0, 10).split("-") : d.split("-");
+    return `${m}-${day}-${y}`; // Always MM-DD-YYYY
   } catch {
     return d;
   }
 }
+
 
 export default function AdminLoginClient() {
   const router = useRouter();
