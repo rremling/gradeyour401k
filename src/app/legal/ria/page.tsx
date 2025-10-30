@@ -21,7 +21,7 @@ export default function RiaAgreementPage() {
           This Registered Investment Advisory Agreement (“Agreement”) is made between{" "}
           <strong>Kenai Investments Inc.</strong>, a Registered Investment Advisor
           (“Advisor”), and the client (“Client”). By purchasing or using services
-          at <strong>gradeyour401k.com</strong> or <strong>PilotYour401k.com</strong>,{" "}
+          at <strong>GradeYour401k.com</strong> or <strong>PilotYour401k.com</strong>,{" "}
           Client acknowledges and agrees to the terms of this Agreement.
         </p>
         <div className="rounded-md border p-4 bg-gray-50 text-sm">
