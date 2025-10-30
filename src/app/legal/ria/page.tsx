@@ -19,8 +19,8 @@ export default function RiaAgreementPage() {
           This Registered Investment Advisory Agreement (“Agreement”) is made between{" "}
           <strong>Kenai Investments Inc.</strong>, a Registered Investment Advisor
           (“Advisor”), and the client (“Client”). By purchasing or using services
-          at <strong>gradeyour401k.com</strong>, Client acknowledges and agrees to
-          the terms of this Agreement.
+          at <strong>gradeyour401k.com</strong> or <strong>PilotYour401k.com<strong>, 
+          Client acknowledges and agrees to the terms of this Agreement.
         </p>
         <div className="rounded-md border p-4 bg-gray-50 text-sm">
           <div><strong>Advisor:</strong> Kenai Investments Inc.</div>
@@ -98,7 +98,8 @@ export default function RiaAgreementPage() {
         <p>
           Kenai Investments Inc. is a Registered Investment Advisor. Registration
           does not imply a certain level of skill or training. Client may request
-          Advisor’s Form ADV Part 2A and 3 (Form CRS) at any time.
+          Advisor’s Form ADV Part 2A and other company documents by visiting 
+          www.kenaiinvest.com.
         </p>
       </section>
 
