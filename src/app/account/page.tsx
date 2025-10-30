@@ -260,6 +260,77 @@ async function logoutAction() {
   redirect("/");
 }
 
+/* NEW: Upload 401(k) Statement into Neon (bytea) */
+async function uploadStatementAction(formData: FormData) {
+  "use server";
+
+  const token = safeCookie("acct");
+  const claims = await verifyAccountToken(token);
+  if (!claims) {
+    redirect("/account?error=Unauthorized");
+  }
+
+  const file = formData.get("statement") as File | null;
+  if (!file) {
+    redirect("/account?stmt=missing");
+  }
+
+  // Validate size (<= 10 MB)
+  const MAX_BYTES = 10 * 1024 * 1024;
+  if (file.size <= 0 || file.size > MAX_BYTES) {
+    redirect("/account?stmt=toolarge");
+  }
+
+  // Validate MIME
+  const ALLOWED = new Set(["application/pdf", "image/jpeg", "image/png"]);
+  const mime = file.type || "application/octet-stream";
+  if (!ALLOWED.has(mime)) {
+    redirect("/account?stmt=badtype");
+  }
+
+  // Read bytes
+  let bytes: Buffer;
+  try {
+    const ab = await file.arrayBuffer();
+    bytes = Buffer.from(ab);
+  } catch (e) {
+    console.error("[account:uploadStatement] read error:", e);
+    redirect("/account?stmt=readfail");
+  }
+
+  // Optional: link to most recent order for the user
+  let orderId: number | null = null;
+  try {
+    const r: any = await query(
+      `SELECT id
+         FROM public.orders
+        WHERE email = $1
+        ORDER BY (plan_key = 'annual') DESC, created_at DESC
+        LIMIT 1`,
+      [claims!.email]
+    );
+    const rows = Array.isArray(r?.rows) ? r.rows : (Array.isArray(r) ? r : []);
+    orderId = rows[0]?.id ?? null;
+  } catch (e) {
+    console.warn("[account:uploadStatement] could not link order_id:", e);
+  }
+
+  // Insert into Postgres
+  try {
+    await query(
+      `INSERT INTO public.statements (email, order_id, file_name, mime_type, byte_size, data)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [claims!.email, orderId, file.name, mime, file.size, bytes]
+    );
+  } catch (e) {
+    console.error("[account:uploadStatement] insert error:", e);
+    redirect("/account?stmt=savefail");
+  }
+
+  revalidatePath("/account");
+  redirect("/account?stmt=ok");
+}
+
 /* ───────────────────── Data Loaders ───────────────────── */
 
 async function getContext() {
@@ -270,7 +341,8 @@ async function getContext() {
     last_advisor_review_at: null as Date | string | null,
     planned_retirement_year: null as number | null,
     employer: "", income_band: "", state: "", comms_pref: "", client_notes: "",
-    full_name: "", phone: ""
+    full_name: "", phone: "",
+    last_statement_uploaded_at: null as Date | string | null,
   };
 
   const email = claims.email;
@@ -314,6 +386,20 @@ async function getContext() {
   const provider = pref.provider || "";
   const profile = pref.profile || "";
 
+  // NEW: last statement upload date
+  const rLastStmt: any = await query(
+    `SELECT uploaded_at
+       FROM public.statements
+      WHERE email = $1
+      ORDER BY uploaded_at DESC
+      LIMIT 1`,
+    [email]
+  );
+  const last_statement_uploaded_at =
+    Array.isArray(rLastStmt?.rows) && rLastStmt.rows[0]?.uploaded_at
+      ? rLastStmt.rows[0].uploaded_at
+      : null;
+
   return {
     email,
     reports,
@@ -328,6 +414,7 @@ async function getContext() {
     client_notes: pref.client_notes || "",
     full_name: pref.full_name || "",
     phone: pref.phone || "",
+    last_statement_uploaded_at,
   };
 }
 
@@ -341,6 +428,7 @@ export default async function AccountPage({
     updated?: string;
     magic?: "sent" | "notfound" | "invalid" | "sendfail";
     phone?: "invalid";
+    stmt?: "ok" | "missing" | "toolarge" | "badtype" | "readfail" | "savefail"; // NEW
   };
 }) {
   const {
@@ -348,7 +436,8 @@ export default async function AccountPage({
     last_advisor_review_at,
     planned_retirement_year,
     employer, income_band, state, comms_pref, client_notes,
-    full_name, phone
+    full_name, phone,
+    last_statement_uploaded_at, // NEW
   } = await getContext();
 
   const errorMsg = searchParams?.error || "";
@@ -612,12 +701,45 @@ export default async function AccountPage({
         </form>
       </section>
 
-      {/* Advisor Review panel */}
+      {/* Advisor Review panel (enhanced with Statement Upload) */}
       <section>
         <h2 className="text-xl font-semibold mb-2">Advisor Review</h2>
+
+        {/* Inline result banners for statement upload */}
+        {searchParams?.stmt === "ok" && (
+          <div className="mb-3 border border-green-200 bg-green-50 text-green-800 rounded-md px-3 py-2">
+            Statement uploaded successfully.
+          </div>
+        )}
+        {searchParams?.stmt === "missing" && (
+          <div className="mb-3 border border-amber-200 bg-amber-50 text-amber-900 rounded-md px-3 py-2">
+            Please choose a file before uploading.
+          </div>
+        )}
+        {searchParams?.stmt === "toolarge" && (
+          <div className="mb-3 border border-red-200 bg-red-50 text-red-800 rounded-md px-3 py-2">
+            File is too large. Max size is 10&nbsp;MB.
+          </div>
+        )}
+        {searchParams?.stmt === "badtype" && (
+          <div className="mb-3 border border-red-200 bg-red-50 text-red-800 rounded-md px-3 py-2">
+            Unsupported file type. Allowed: PDF, JPG, PNG.
+          </div>
+        )}
+        {searchParams?.stmt === "readfail" && (
+          <div className="mb-3 border border-red-200 bg-red-50 text-red-800 rounded-md px-3 py-2">
+            Couldn’t read the file. Please try again.
+          </div>
+        )}
+        {searchParams?.stmt === "savefail" && (
+          <div className="mb-3 border border-red-200 bg-red-50 text-red-800 rounded-md px-3 py-2">
+            We couldn’t save your statement right now. Please try again shortly.
+          </div>
+        )}
+
         <div className="rounded-lg border p-4 bg-white">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="space-y-1">
               <div className="text-slate-600">
                 Last Advisor Review:{" "}
                 <strong>
@@ -626,13 +748,48 @@ export default async function AccountPage({
                     : "—"}
                 </strong>
               </div>
+              <div className="text-slate-600">
+                Last Statement Upload:{" "}
+                <strong>
+                  {last_statement_uploaded_at
+                    ? new Date(last_statement_uploaded_at).toLocaleDateString()
+                    : "—"}
+                </strong>
+              </div>
+              <p className="text-xs text-slate-500">
+                Accepted types: PDF, JPG, PNG • Max 10&nbsp;MB • Avoid full SSNs.
+              </p>
             </div>
-            <a
-              href={ADVISOR_REVIEW_URL}
-              className="inline-flex items-center justify-center rounded-lg px-4 py-2 bg-emerald-600 text-white font-semibold hover:bg-emerald-700"
-            >
-              Book your $149 Advisor Review
-            </a>
+
+            <div className="flex flex-col sm:items-end gap-3 w-full sm:w-auto">
+              {/* Upload mini-form */}
+              <form action={uploadStatementAction} className="flex items-center gap-2">
+                <input
+                  type="file"
+                  name="statement"
+                  accept=".pdf,image/jpeg,image/png"
+                  className="block w-full sm:w-64 text-sm
+                             file:mr-3 file:rounded-md file:border file:border-slate-300
+                             file:bg-slate-50 file:px-3 file:py-1.5 file:text-sm
+                             file:text-slate-700 hover:file:bg-slate-100"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center rounded-lg px-3 py-2 bg-slate-900 text-white font-semibold"
+                >
+                  Upload
+                </button>
+              </form>
+
+              {/* Existing book button */}
+              <a
+                href={ADVISOR_REVIEW_URL}
+                className="inline-flex items-center justify-center rounded-lg px-4 py-2 bg-emerald-600 text-white font-semibold hover:bg-emerald-700"
+              >
+                Book your $149 Advisor Review
+              </a>
+            </div>
           </div>
         </div>
       </section>
