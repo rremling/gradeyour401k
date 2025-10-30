@@ -5,7 +5,7 @@ import { sql } from "../../../lib/db"; // adjust if your alias/path differs
 type SearchParams = { previewId?: string };
 type Holding = { symbol: string; weight: number };
 
-// ---- Stepper (mobile-friendly like the grade page) ----
+// ---- Stepper (mobile-friendly) ----
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
