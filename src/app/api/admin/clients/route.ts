@@ -20,10 +20,10 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("search") || "").trim();
     const limitRaw = Number(searchParams.get("limit"));
-    const limit = Number.isFinite(limitRaw)
-      ? Math.min(Math.max(limitRaw, 1), 1000)
-      : 200;
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 1000) : 200;
 
+    // NOTE: We pull one "ranked" orders row per email (same precedence as before),
+    // and LATERAL join the latest statement uploaded_at from public.statements.
     const rows: any[] = q
       ? await sql/*sql*/`
         WITH ranked AS (
@@ -51,10 +51,16 @@ export async function GET(req: Request) {
           LEFT JOIN public.previews p ON p.id = o.preview_id
           WHERE o.email ILIKE ${"%" + q + "%"}
         )
-        SELECT *
-        FROM ranked
-        WHERE rn = 1
-        ORDER BY email ASC
+        SELECT r.*,
+               s.last_statement_uploaded_at
+        FROM ranked r
+        LEFT JOIN LATERAL (
+          SELECT MAX(uploaded_at) AS last_statement_uploaded_at
+          FROM public.statements st
+          WHERE st.email = r.email
+        ) s ON TRUE
+        WHERE r.rn = 1
+        ORDER BY r.email ASC
         LIMIT ${limit};
       `
       : await sql/*sql*/`
@@ -82,10 +88,16 @@ export async function GET(req: Request) {
           FROM public.orders o
           LEFT JOIN public.previews p ON p.id = o.preview_id
         )
-        SELECT *
-        FROM ranked
-        WHERE rn = 1
-        ORDER BY email ASC
+        SELECT r.*,
+               s.last_statement_uploaded_at
+        FROM ranked r
+        LEFT JOIN LATERAL (
+          SELECT MAX(uploaded_at) AS last_statement_uploaded_at
+          FROM public.statements st
+          WHERE st.email = r.email
+        ) s ON TRUE
+        WHERE r.rn = 1
+        ORDER BY r.email ASC
         LIMIT ${limit};
       `;
 
@@ -103,6 +115,8 @@ export async function GET(req: Request) {
       stripe_customer_id: r.stripe_customer_id ?? null,
       latest_preview_id: r.latest_preview_id ?? null,
       latest_preview_created_at: r.latest_preview_created_at ?? null,
+      // NEW: expose latest statement timestamp (ISO string)
+      last_statement_uploaded_at: r.last_statement_uploaded_at ?? null,
     }));
 
     return NextResponse.json({ clients });
