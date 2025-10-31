@@ -189,7 +189,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     } catch {}
   }
 
-  y -= 100; // breathing room under logos
+  y -= 50; // breathing room under logos
 
   // Title (ASCII hyphen)
   page.drawText("GradeYour401k - Personalized Report", {
@@ -255,7 +255,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   y -= 28;
 
   /* ───────── Section: Recommended (boxed) ───────── */
-  page.drawText("RECOMMENDED HOLDINGS (Static: Fidelity / Growth)", {
+  page.drawText("RECOMMENDED HOLDINGS (Fidelity / Growth)", {
     x: margin,
     y,
     font: fontBold,
@@ -352,7 +352,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
       height: gh,
       color: rgb(0.2, 0.65, 0.3),
     });
-    y -= 18;
+    y -= 28;
   }
 
   const commentary =
