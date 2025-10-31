@@ -1,67 +1,10 @@
 // src/app/grade/results/page.tsx
 import Link from "next/link";
 import { sql } from "../../../lib/db"; // adjust if your alias/path differs
+import { FUND_LABELS, labelFor } from "@/lib/funds";
 
 type SearchParams = { previewId?: string };
 type Holding = { symbol: string; weight: number };
-
-// ───────────────────────── Label helpers (starter set) ─────────────────────────
-const FUND_LABELS: Record<string, string> = {
-  // Common “new page” defaults the user often enters
-  FSKAX: "Fidelity® Total Market Index",
-  FXNAX: "Fidelity® U.S. Bond Index",
-
-  // Fidelity (subset)
-  FXAIX: "Fidelity® 500 Index",
-  FBND: "Fidelity® Total Bond ETF",
-  FNCL: "Fidelity® MSCI Financials ETF",
-  FTEC: "Fidelity® MSCI Information Technology ETF",
-  FHLC: "Fidelity® MSCI Health Care ETF",
-  FDIS: "Fidelity® MSCI Consumer Discretionary ETF",
-  FSTA: "Fidelity® MSCI Consumer Staples ETF",
-  FENY: "Fidelity® MSCI Energy ETF",
-  FREL: "Fidelity® MSCI Real Estate ETF",
-
-  // Vanguard (subset)
-  VOO: "Vanguard S&P 500 ETF",
-  VTI: "Vanguard Total Stock Market ETF",
-  VXUS: "Vanguard Total International Stock ETF",
-  BND: "Vanguard Total Bond Market ETF",
-  VNQ: "Vanguard Real Estate ETF",
-  VGT: "Vanguard Information Technology ETF",
-  VHT: "Vanguard Health Care ETF",
-  VYM: "Vanguard High Dividend Yield ETF",
-
-  // Schwab (subset)
-  SCHB: "Schwab U.S. Broad Market ETF",
-  SCHX: "Schwab U.S. Large-Cap ETF",
-  SCHZ: "Schwab U.S. Aggregate Bond ETF",
-  SCHD: "Schwab U.S. Dividend Equity ETF",
-  SCHH: "Schwab U.S. REIT ETF",
-
-  // SPDR / State Street (subset)
-  SPY: "SPDR S&P 500 ETF Trust",
-  SPLG: "SPDR Portfolio S&P 500 ETF",
-  XLK: "Technology Select Sector SPDR",
-  XLF: "Financial Select Sector SPDR",
-  XLU: "Utilities Select Sector SPDR",
-
-  // iShares / BlackRock (subset)
-  IVV: "iShares Core S&P 500 ETF",
-  ITOT: "iShares Core S&P Total U.S. Stock Market ETF",
-  IEFA: "iShares Core MSCI EAFE ETF",
-  IEMG: "iShares Core MSCI Emerging Markets ETF",
-  AGG: "iShares Core U.S. Aggregate Bond ETF",
-
-  // Invesco (subset)
-  QQQ: "Invesco QQQ Trust",
-  SPLV: "Invesco S&P 500 Low Volatility ETF",
-};
-function labelFor(sym: string): string {
-  const s = (sym || "").toUpperCase().trim();
-  const name = FUND_LABELS[s];
-  return name ? `${s} — ${name}` : s;
-}
 
 // ───────────────────────── Stepper (mobile-friendly) ─────────────────────────
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
@@ -346,7 +289,7 @@ export default async function ResultPage({
           <ul className="mt-3 text-sm text-gray-800 divide-y">
             {holdings.map((r, idx) => {
               const sym = (r.symbol || "").toUpperCase().trim();
-              const desc = FUND_LABELS[sym]; // normalized lookup so known labels show up
+              const desc = FUND_LABELS[sym]; // shared map from lib
               return (
                 <li key={`${r.symbol}-${idx}`} className="py-2 flex items-start justify-between gap-3">
                   <div className="min-w-0">
