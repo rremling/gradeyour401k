@@ -35,14 +35,12 @@ const COMMS_PREFS = ["email", "phone_email"] as const;
 function fmtDate(d?: string | null) {
   if (!d) return "—";
   try {
-    // Handle both "YYYY-MM-DD" and full ISO strings
     const [y, m, day] = d.length > 10 ? d.slice(0, 10).split("-") : d.split("-");
-    return `${m}-${day}-${y}`; // Always MM-DD-YYYY
+    return `${m}-${day}-${y}`; // MM-DD-YYYY
   } catch {
     return d;
   }
 }
-
 
 export default function AdminLoginClient() {
   const router = useRouter();
@@ -67,10 +65,21 @@ export default function AdminLoginClient() {
   // local editable copies
   const [drafts, setDrafts] = useState<Record<string, ClientRow>>({});
 
+  // ✅ Client-side ranking (do NOT filter away non-matches)
+  // Bring matches to the top: startsWith > includes > none; then stable by email
   const visibleRows = useMemo(() => {
-    if (!search.trim()) return rows;
+    const all = rows.slice();
     const q = search.trim().toLowerCase();
-    return rows.filter((r) => r.email.toLowerCase().includes(q));
+    if (!q) return all;
+    const rank = (e: string) => (e.startsWith(q) ? 0 : e.includes(q) ? 1 : 2);
+    return all.sort((a, b) => {
+      const ae = a.email.toLowerCase();
+      const be = b.email.toLowerCase();
+      const ra = rank(ae);
+      const rb = rank(be);
+      if (ra !== rb) return ra - rb;
+      return ae.localeCompare(be);
+    });
   }, [rows, search]);
 
   useEffect(() => {
@@ -82,6 +91,13 @@ export default function AdminLoginClient() {
           const data = await res.json();
           setRows(data?.clients || []);
           setAuthed(true);
+          setDrafts((d) => {
+            const next: Record<string, ClientRow> = {};
+            for (const r of data?.clients || []) {
+              next[r.email] = d[r.email] || r;
+            }
+            return next;
+          });
         } else if (res.status === 401) {
           setAuthed(false);
         } else {
@@ -119,14 +135,12 @@ export default function AdminLoginClient() {
     }
   }
 
+  // ✅ Always fetch ALL clients; search is client-side only
   async function reloadClients() {
     setIsFetching(true);
     setErr(null);
     try {
-      const url = search.trim()
-        ? `/api/admin/clients?search=${encodeURIComponent(search.trim())}`
-        : `/api/admin/clients`;
-      const res = await fetch(url, { cache: "no-store", credentials: "include" });
+      const res = await fetch(`/api/admin/clients`, { cache: "no-store", credentials: "include" });
       if (!res.ok) {
         if (res.status === 401) {
           setAuthed(false);
@@ -260,7 +274,7 @@ export default function AdminLoginClient() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") reloadClients();
+              if (e.key === "Enter") reloadClients(); // still allowed, but will fetch ALL and sort client-side
             }}
           />
           <button
