@@ -261,7 +261,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     font: fontBold,
     size: 13,
   });
-  y -= 8;
+  y -= 10;
 
   const boxX = 44;
   const boxW = 612 - boxX * 2;
@@ -381,7 +381,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   const steps = [
     "1) Log in to your 401(k) plan and make the recommended holding adjustments listed above.",
     "2) If your plan doesn't offer a specific symbol, replace it with a like-kind fund in the same asset class and mandate (e.g., large-cap growth ETF <-> large-cap growth index fund).",
-    "3) Log in to gradeyour401k.com to update your information, view past reports, or schedule a 401(k) Review with Kenai Investments.",
+    "3) Log in to GradeYour401k.com to update your information, view past reports, or schedule a 401(k) Review with Kenai Investments.",
   ];
   steps.forEach((s) => {
     wrap(s, 98).forEach((line) => {
