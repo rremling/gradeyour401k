@@ -5,7 +5,7 @@ import SuccessClient from "./SuccessClient";
 // Ensure this page is not pre-rendered in a way that trips CSR bailout checks.
 export const dynamic = "force-dynamic";
 
-// --- Stepper (kept only for the loading fallback) ---
+// --- Stepper ---
 function Stepper({ current = 4 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -97,18 +97,17 @@ function Stepper({ current = 4 }: { current?: 1 | 2 | 3 | 4 }) {
 
 export default function SuccessPage() {
   return (
-    <Suspense
-      fallback={
-        <main className="mx-auto max-w-3xl p-6">
-          <Stepper current={4} />
+    <main className="mx-auto max-w-3xl p-6 md:p-10">
+      <Stepper current={4} />
+      <Suspense
+        fallback={
           <div className="rounded-lg border p-6 bg-white text-sm text-gray-600">
             Finalizing your order…
           </div>
-        </main>
-      }
-    >
-      {/* Only render the client component; it already includes the header/stepper */}
-      <SuccessClient />
-    </Suspense>
+        }
+      >
+        <SuccessClient />
+      </Suspense>
+    </main>
   );
 }
