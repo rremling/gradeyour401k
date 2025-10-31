@@ -255,10 +255,7 @@ export default function AdminLoginClient() {
             {loading ? "Logging in…" : "Login"}
           </button>
 
-          <p className="text-xs text-slate-500">
-            After login you’ll see a simple CRM with client fields from Account pages.
-          </p>
-        </form>
+              </form>
       </main>
     );
   }
