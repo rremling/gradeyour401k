@@ -1,28 +1,37 @@
 // src/app/api/admin/clients/route.ts
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { neon } from "@neondatabase/serverless";
+import { NextRequest, NextResponse } from "next/server";
+import { Pool } from "pg";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
+const DATABASE_URL = process.env.DATABASE_URL || "";
+if (!DATABASE_URL) console.warn("[/api/admin/clients] Missing DATABASE_URL");
+
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+// Basic auth check: require an admin session cookie.
+// Adjust the cookie name / logic to match your existing /api/admin/session.
+function requireAdmin(req: NextRequest) {
+  const cookie = req.cookies.get("admin_session")?.value;
+  return Boolean(cookie && cookie.length > 0);
+}
+
+export async function GET(req: NextRequest) {
   try {
-    // --- Auth ---
-    if (!cookies().get("admin_session")?.value) {
+    // Auth
+    if (!requireAdmin(req)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // --- DB ---
-    const url = process.env.DATABASE_URL;
-    if (!url) return NextResponse.json({ clients: [], _error: "Missing DATABASE_URL" });
-    const sql = neon(url);
+    // NOTE:
+    // We intentionally do NOT use any WHERE email = $1 here.
+    // We want *all* distinct clients (one latest row per email),
+    // preferring annual plan rows, then most recent by created_at.
 
-    const { searchParams } = new URL(req.url);
-    const q = (searchParams.get("search") || "").trim();
-    const limitRaw = Number(searchParams.get("limit"));
-    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 1000) : 200;
-
-    const baseCte = /* sql */ `
+    const sql = `
       WITH ranked AS (
         SELECT
           o.email,
@@ -33,96 +42,45 @@ export async function GET(req: Request) {
           o.income_band,
           o.state,
           o.comms_pref,
-          (o.last_advisor_review_at::date) AS last_advisor_review_at_row, -- keep original if needed
+          -- normalize to YYYY-MM-DD for the UI date input
+          TO_CHAR(o.last_advisor_review_at, 'YYYY-MM-DD') AS last_advisor_review_at,
           o.client_notes,
-          o.plan_key,
-          o.created_at,
-          o.updated_at,
           o.stripe_customer_id,
-          p.id::text AS latest_preview_id,
-          p.created_at AS latest_preview_created_at,
+          o.preview_id::text AS latest_preview_id,
+          o.full_name,
+          -- rank latest per email: prefer annual, then newest created_at
           ROW_NUMBER() OVER (
             PARTITION BY o.email
             ORDER BY (o.plan_key = 'annual') DESC, o.created_at DESC
           ) AS rn
         FROM public.orders o
-        LEFT JOIN public.previews p ON p.id = o.preview_id
-        /**WHERE_CLAUSE**/
       )
       SELECT
-        r.email,
-        r.provider,
-        r.profile,
-        r.planned_retirement_year,
-        r.employer,
-        r.income_band,
-        r.state,
-        r.comms_pref,
-        r.client_notes,
-        r.plan_key,
-        r.created_at,
-        r.updated_at,
-        r.stripe_customer_id,
-        r.latest_preview_id,
-        r.latest_preview_created_at,
-        s.last_statement_uploaded_at,
-        x.latest_review_date::date AS last_advisor_review_at,
-        x.best_full_name
-      FROM ranked r
-      LEFT JOIN LATERAL (
-        SELECT MAX(uploaded_at) AS last_statement_uploaded_at
-        FROM public.statements st
-        WHERE st.email = r.email
-      ) s ON TRUE
-      LEFT JOIN LATERAL (
-        SELECT
-          MAX(o2.last_advisor_review_at) AS latest_review_date,
-          (
-            SELECT o3.full_name
-            FROM public.orders o3
-            WHERE o3.email = r.email
-              AND COALESCE(NULLIF(TRIM(o3.full_name), ''), NULL) IS NOT NULL
-            ORDER BY (o3.plan_key = 'annual') DESC,
-                     o3.updated_at DESC NULLS LAST,
-                     o3.created_at DESC
-            LIMIT 1
-          ) AS best_full_name
-        FROM public.orders o2
-        WHERE o2.email = r.email
-      ) x ON TRUE
-      WHERE r.rn = 1
-      ORDER BY r.email ASC
-      LIMIT ${limit};
+        email,
+        provider,
+        profile,
+        planned_retirement_year,
+        employer,
+        income_band,
+        state,
+        comms_pref,
+        last_advisor_review_at,
+        client_notes,
+        stripe_customer_id,
+        latest_preview_id,
+        full_name,
+        NULL::text AS last_statement_uploaded_at -- placeholder; join your statements table if needed
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY LOWER(email) ASC;
     `;
 
-    const rows: any[] = q
-      ? await sql(baseCte.replace("/**WHERE_CLAUSE**/", `WHERE o.email ILIKE ${"%" + q + "%"}`) as any)
-      : await sql(baseCte.replace("/**WHERE_CLAUSE**/", "") as any);
+    const r = await pool.query(sql);
+    const clients = r.rows || [];
 
-    const clients = rows.map((r) => ({
-      email: r.email,
-      provider: r.provider ?? null,
-      profile: r.profile ?? null,
-      planned_retirement_year: r.planned_retirement_year ?? null,
-      employer: r.employer ?? null,
-      income_band: r.income_band ?? null,
-      state: r.state ?? null,
-      comms_pref: r.comms_pref ?? null,
-      last_advisor_review_at: r.last_advisor_review_at ?? null, // fixed: greatest non-NULL across orders
-      client_notes: r.client_notes ?? null,
-      stripe_customer_id: r.stripe_customer_id ?? null,
-      latest_preview_id: r.latest_preview_id ?? null,
-      latest_preview_created_at: r.latest_preview_created_at ?? null,
-      last_statement_uploaded_at: r.last_statement_uploaded_at ?? null,
-      full_name: r.best_full_name ?? null, // NEW
-    }));
-
-    return NextResponse.json({ clients });
-  } catch (err: any) {
-    console.error("GET /api/admin/clients error:", err);
-    return NextResponse.json(
-      { clients: [], _error: err?.code || err?.message || "DB error" },
-      { status: 200 }
-    );
+    return NextResponse.json({ clients }, { status: 200 });
+  } catch (e: any) {
+    console.error("[/api/admin/clients GET] error:", e?.message || e);
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
