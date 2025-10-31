@@ -7,190 +7,176 @@ export type PdfArgs = {
   profile: string;
   grade: number | string | null;
   holdings: Array<{ symbol: string; weight: number }>;
-  logoUrl?: string;
-  bullUrl?: string;
+  logoUrl?: string;          // GradeYour401k logo
+  bullUrl?: string;          // Kenai bull logo
+  fearGreedImageUrl?: string;// optional image (PNG/JPG)
   clientName?: string;
   reportDate?: string | Date;
-  /** NEW: optional Fear & Greed image (PNG/JPG). If missing/invalid, we draw the bar gauge. */
-  fearGreedImageUrl?: string;
 };
 
-function formatGrade(g: number | string | null): string {
+/* ──────────────── helpers ──────────────── */
+function titleCase(s: string) { return (s || "").replace(/\b\w/g, c => c.toUpperCase()); }
+function formatGrade(g: number | string | null) {
   if (g == null) return "—";
   const n = Number(g);
   return Number.isFinite(n) ? `${n.toFixed(1)} / 5` : String(g);
 }
-function titleCase(x: string) { return (x || "").replace(/\b\w/g, c => c.toUpperCase()); }
 const descFor = (sym: string) => FUND_LABELS[(sym || "").toUpperCase().trim()];
 
-/** Static model for Fidelity Growth (as requested) */
+/* Static Fidelity/Growth model */
 function staticRecommended(provider: string, profile: string) {
-  const prov = (provider || "").toLowerCase();
-  const prof = (profile || "").toLowerCase();
-  if (prov.includes("fidelity") && prof === "growth") {
-    return {
-      label: "Static model — Fidelity / Growth",
-      rows: [
-        { symbol: "FSELX", weight: 30 },
-        { symbol: "FDCPX", weight: 30 },
-        { symbol: "FSPTX", weight: 30 },
-        { symbol: "SPAXX", weight: 10 },
-      ],
-    };
+  const p = provider.toLowerCase(), r = profile.toLowerCase();
+  if (p.includes("fidelity") && r === "growth") {
+    return [
+      { symbol: "FSELX", weight: 30 },
+      { symbol: "FDCPX", weight: 30 },
+      { symbol: "FSPTX", weight: 30 },
+      { symbol: "SPAXX", weight: 10 },
+    ];
   }
-  return { label: "Model recommendations (static placeholder)", rows: [] as {symbol:string;weight:number}[] };
+  return [];
 }
 
-type DrawTableRow = { symbol: string; desc?: string; weight?: string; };
-type TableOptions = {
-  x: number; yStart: number; width: number; rowH?: number; zebra?: boolean;
-  showHeader?: boolean; weightCol?: boolean; font: any; fontBold: any; fontSize?: number;
-};
+/* Draw holdings table */
+function drawTable(page: any, rows: any[], y: number, font: any, fontBold: any) {
+  const x = 50, width = 512, rowH = 24;
+  const colSymbol = 120, colWeight = 70, pad = 10;
+  const fontSize = 10.5;
 
-function drawTable(page: any, rows: DrawTableRow[], opts: TableOptions) {
-  const { x, yStart, width, rowH = 22, zebra = true, showHeader = true, weightCol = true, font, fontBold, fontSize = 10 } = opts;
-  const paddingX = 10, paddingY = 6;
-  const descColor = rgb(0.35, 0.35, 0.35), textColor = rgb(0.1, 0.1, 0.1);
-  const weightW = weightCol ? 70 : 0, symbolW = 130, descW = width - symbolW - weightW;
+  // Header
+  page.drawRectangle({ x, y: y - rowH + 2, width, height: rowH, color: rgb(0.9,0.93,1), opacity: 0.35 });
+  page.drawText("Symbol", { x: x + pad, y: y - 8 - fontSize, font: fontBold, size: fontSize });
+  page.drawText("Description", { x: x + colSymbol + pad, y: y - 8 - fontSize, font: fontBold, size: fontSize });
+  page.drawText("Weight", { x: x + width - pad - 40, y: y - 8 - fontSize, font: fontBold, size: fontSize });
+  y -= rowH;
 
-  let y = yStart;
-  if (showHeader) {
-    if (zebra) page.drawRectangle({ x, y: y - rowH + 2, width, height: rowH, color: rgb(0.92, 0.95, 1), opacity: 0.35 });
-    page.drawText("Symbol", { x: x + paddingX, y: y - paddingY - fontSize, font: fontBold, size: fontSize, color: textColor });
-    page.drawText("Description", { x: x + symbolW + paddingX, y: y - paddingY - fontSize, font: fontBold, size: fontSize, color: textColor });
-    if (weightCol) {
-      const wLab = "Weight", wWidth = font.widthOfTextAtSize(wLab, fontSize);
-      page.drawText(wLab, { x: x + width - paddingX - wWidth, y: y - paddingY - fontSize, font: fontBold, size: fontSize, color: textColor });
-    }
-    y -= rowH;
-  }
-
-  rows.forEach((r, idx) => {
-    if (zebra && idx % 2 === 0) {
-      page.drawRectangle({ x, y: y - rowH + 2, width, height: rowH, color: rgb(0.93, 0.93, 0.95), opacity: 0.35 });
-    }
-    page.drawText(r.symbol, { x: x + paddingX, y: y - paddingY - fontSize, font, size: fontSize, color: textColor });
-
-    const maxDescWidth = (width - 130 - (weightCol ? 70 : 0)) - paddingX * 2;
-    let desc = r.desc || "";
-    while (desc && font.widthOfTextAtSize(desc, fontSize) > maxDescWidth) desc = desc.slice(0, -1);
-    if (r.desc && desc.length < (r.desc || "").length) desc = desc.replace(/\s+\S*$/, "") + "…";
-    if (desc) page.drawText(desc, { x: x + 130 + paddingX, y: y - paddingY - fontSize, font, size: fontSize, color: descColor });
-
-    if (weightCol && r.weight != null) {
-      const txt = r.weight, w = font.widthOfTextAtSize(txt, fontSize);
-      page.drawText(txt, { x: x + width - paddingX - w, y: y - paddingY - fontSize, font, size: fontSize, color: textColor });
-    }
+  // Body
+  rows.forEach((r, i) => {
+    if (i % 2 === 0)
+      page.drawRectangle({ x, y: y - rowH + 2, width, height: rowH, color: rgb(0.94,0.94,0.96), opacity: 0.25 });
+    const desc = descFor(r.symbol) || "";
+    page.drawText(r.symbol, { x: x + pad, y: y - 8 - fontSize, font, size: fontSize });
+    page.drawText(desc.length > 70 ? desc.slice(0,67)+"…" : desc,
+      { x: x + colSymbol + pad, y: y - 8 - fontSize, font, size: fontSize, color: rgb(0.35,0.35,0.35) });
+    const w = `${r.weight.toFixed(1)}%`;
+    const tw = font.widthOfTextAtSize(w, fontSize);
+    page.drawText(w, { x: x + width - pad - tw, y: y - 8 - fontSize, font, size: fontSize });
     y -= rowH;
   });
   return y;
 }
 
+/* ──────────────── main generator ──────────────── */
 export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
-  const { provider, profile, grade, holdings, logoUrl, bullUrl, clientName, reportDate, fearGreedImageUrl } = args;
+  const { provider, profile, grade, holdings, logoUrl, bullUrl, fearGreedImageUrl, clientName, reportDate } = args;
 
   const doc = await PDFDocument.create();
   const page = doc.addPage([612, 792]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-
   const margin = 44;
   let y = 792 - margin;
 
-  // Logo (bigger)
+  /* HEADER AREA */
+  // Left logo (GradeYour401k)
   if (logoUrl) {
     try {
-      const imgBytes = await fetch(logoUrl).then(r => r.arrayBuffer());
-      const img = await doc.embedPng(imgBytes);
-      const logoW = 170, logoH = logoW * (img.height / img.width);
-      page.drawImage(img, { x: margin, y: y - logoH, width: logoW, height: logoH });
+      const img = await doc.embedPng(await fetch(logoUrl).then(r=>r.arrayBuffer()));
+      const w = 160, h = w * (img.height/img.width);
+      page.drawImage(img, { x: margin, y: y - h + 10, width: w, height: h });
     } catch {}
   }
-  // Optional bull watermark (bigger)
+  // Right bull (Kenai)
   if (bullUrl) {
     try {
-      const bullBytes = await fetch(bullUrl).then(r => r.arrayBuffer());
-      const bullImg = await doc.embedPng(bullBytes);
-      const bw = 120, bh = bw * (bullImg.height / bullImg.width);
-      page.drawImage(bullImg, { x: 612 - margin - bw, y: y - bh + 6, width: bw, height: bh, opacity: 0.25 });
+      const img = await doc.embedPng(await fetch(bullUrl).then(r=>r.arrayBuffer()));
+      const w = 110, h = w * (img.height/img.width);
+      page.drawImage(img, { x: 612 - margin - w, y: y - h + 25, width: w, height: h, opacity: 0.25 });
     } catch {}
   }
 
-  y -= 12;
-  page.drawText("GradeYour401k — Personalized Report", { x: margin, y: y - 32, font: fontBold, size: 18, color: rgb(0.1, 0.1, 0.1) });
+  y -= 100; // create more breathing room
 
-  const line2 = [`Provider: ${titleCase(provider)}`, `Profile: ${titleCase(profile)}`, `Preliminary Grade: ${formatGrade(grade)}`].join("   •   ");
-  page.drawText(line2, { x: margin, y: y - 52, font, size: 11.5, color: rgb(0.2, 0.2, 0.2) });
+  page.drawText("GradeYour401k — Personalized Report",
+    { x: margin, y: y, font: fontBold, size: 18, color: rgb(0.1,0.1,0.1) });
+  y -= 26;
+  const meta = [
+    `Provider: ${titleCase(provider)}`,
+    `Profile: ${titleCase(profile)}`,
+    `Grade: ${formatGrade(grade)}`
+  ].join("   •   ");
+  page.drawText(meta, { x: margin, y, font, size: 11.5, color: rgb(0.25,0.25,0.25) });
+  y -= 16;
+  const meta2 = [
+    clientName ? `Client: ${clientName}` : "",
+    reportDate ? `Date: ${new Date(reportDate).toLocaleDateString()}` : ""
+  ].filter(Boolean).join("   •   ");
+  if (meta2) page.drawText(meta2, { x: margin, y, font, size: 10.5, color: rgb(0.4,0.4,0.4) });
 
-  if (clientName || reportDate) {
-    const meta = [clientName ? `Client: ${clientName}` : null, reportDate ? `Date: ${new Date(reportDate).toLocaleDateString()}` : null].filter(Boolean).join("   •   ");
-    page.drawText(meta, { x: margin, y: y - 68, font, size: 10.5, color: rgb(0.35, 0.35, 0.35) });
-  }
-  y -= 90;
+  y -= 36;
 
-  // Current Holdings
-  page.drawText("Current Holdings", { x: margin, y, font: fontBold, size: 13, color: rgb(0.1, 0.1, 0.1) });
-  y -= 10;
-  const rowsCurrent = (holdings || []).map(h => ({ symbol: (h.symbol || "").toUpperCase(), desc: descFor(h.symbol), weight: `${Number(h.weight || 0).toFixed(1)}%` }));
-  y = drawTable(page, rowsCurrent, { x: margin, yStart: y, width: 612 - margin * 2, rowH: 24, zebra: true, showHeader: true, weightCol: true, font, fontBold, fontSize: 10.5 });
-  y -= 12;
-
-  // Recommended (static Fidelity Growth)
-  const rec = staticRecommended(provider, profile);
-  page.drawText("Recommended Holdings", { x: margin, y, font: fontBold, size: 13, color: rgb(0.1, 0.1, 0.1) });
-  y -= 14;
-  page.drawText(rec.label, { x: margin, y, font, size: 10.5, color: rgb(0.35, 0.35, 0.35) });
-  y -= 6;
-
-  if (rec.rows.length) {
-    const recRows = rec.rows.map(r => ({ symbol: r.symbol, desc: descFor(r.symbol), weight: `${r.weight.toFixed(1)}%` }));
-    y = drawTable(page, recRows, { x: margin, yStart: y, width: 612 - margin * 2, rowH: 24, zebra: true, showHeader: true, weightCol: true, font, fontBold, fontSize: 10.5 });
-  } else {
-    page.drawText("Model details will appear here.", { x: margin, y: y - 18, font, size: 10.5, color: rgb(0.35, 0.35, 0.35) });
-    y -= 30;
-  }
+  /* SECTION 1 — Current Holdings */
+  page.drawText("CURRENT HOLDINGS", { x: margin, y, font: fontBold, size: 13 });
   y -= 8;
+  y = drawTable(page, holdings || [], y, font, fontBold);
+  y -= 28; // extra gap
 
-  // Market Sentiment — try image first
-  page.drawText("Market Sentiment", { x: margin, y, font: fontBold, size: 13, color: rgb(0.1, 0.1, 0.1) });
+  /* SECTION 2 — Recommended Holdings */
+  page.drawText("RECOMMENDED HOLDINGS (Static: Fidelity / Growth)",
+    { x: margin, y, font: fontBold, size: 13 });
+  y -= 8;
+  const rec = staticRecommended(provider, profile);
+  y = rec.length ? drawTable(page, rec, y, font, fontBold)
+                 : (page.drawText("Model recommendations will appear here.", {x:margin, y:y-14, font, size:10.5}), y-24);
+  y -= 36;
+
+  /* SECTION 3 — Market Sentiment */
+  page.drawText("MARKET SENTIMENT", { x: margin, y, font: fontBold, size: 13 });
   y -= 18;
 
-  let drewImage = false;
+  let drew = false;
   if (fearGreedImageUrl) {
     try {
-      const bytes = await fetch(fearGreedImageUrl).then(r => r.arrayBuffer());
-      // Try PNG first, then JPG
-      let img: any | null = null;
+      const bytes = await fetch(fearGreedImageUrl).then(r=>r.arrayBuffer());
+      let img:any=null;
       try { img = await doc.embedPng(bytes); } catch { img = await doc.embedJpg(bytes); }
       if (img) {
-        const maxW = 612 - margin * 2;
-        const targetW = Math.min(maxW, 500);
-        const targetH = targetW * (img.height / img.width);
-        page.drawImage(img, { x: margin, y: y - targetH, width: targetW, height: targetH });
-        y -= targetH + 8;
-        drewImage = true;
+        const maxW = 400, w = Math.min(maxW, img.width);
+        const h = w * (img.height / img.width);
+        const cx = (612 - w)/2;
+        page.drawImage(img, { x: cx, y: y - h, width: w, height: h });
+        y -= h + 8;
+        drew = true;
       }
-    } catch {
-      // ignore, will fall back to bar
-    }
+    } catch {}
+  }
+  if (!drew) {
+    const fgVal = 63;
+    page.drawText(`Fear & Greed Index: ${fgVal} — Greed`,
+      { x: margin, y, font, size: 10.5, color: rgb(0.2,0.2,0.2) });
+    y -= 14;
+    const gx = margin, gw = 512, gh = 10;
+    page.drawRectangle({ x: gx, y: y-gh, width: gw, height: gh, color: rgb(0.9,0.9,0.9) });
+    page.drawRectangle({ x: gx, y: y-gh, width: gw*(fgVal/100), height: gh, color: rgb(0.2,0.65,0.3) });
+    y -= 30;
   }
 
-  if (!drewImage) {
-    // Fallback simple gauge bar
-    const fgValue = 63; // static placeholder
-    page.drawText(`Fear & Greed Index (static placeholder): ${fgValue} — Greed`, { x: margin, y, font, size: 10.5, color: rgb(0.2, 0.2, 0.2) });
-    y -= 10;
-    const gaugeW = 612 - margin * 2, gaugeH = 10, gx = margin, gy = y - gaugeH - 4;
-    page.drawRectangle({ x: gx, y: gy, width: gaugeW, height: gaugeH, color: rgb(0.92, 0.92, 0.92) });
-    const pct = Math.max(0, Math.min(100, fgValue)) / 100;
-    page.drawRectangle({ x: gx, y: gy, width: gaugeW * pct, height: gaugeH, color: rgb(0.2, 0.65, 0.3) });
-    y = gy - 20;
-  }
+  /* FINAL NOTE */
+  page.drawText("Next Steps", { x: margin, y, font: fontBold, size: 13 });
+  y -= 14;
+  const note =
+    "Log in to your GradeYour401k account to update your information, view past reports, or schedule a 401(k) Review with Kenai Investments.";
+  const lines = note.match(/.{1,95}(\s|$)/g) || [note];
+  lines.forEach(line => {
+    page.drawText(line.trim(), { x: margin, y, font, size: 10.5, color: rgb(0.25,0.25,0.25) });
+    y -= 14;
+  });
 
-  // Footer
-  const footer = "Kenai Investments Inc. — www.kenaiinvest.com";
-  const fw = font.widthOfTextAtSize(footer, 10);
-  page.drawText(footer, { x: (612 - fw) / 2, y: 24, font, size: 10, color: rgb(0.35, 0.35, 0.35) });
+  /* FOOTER */
+  page.drawLine({ start: {x: margin, y: 40}, end: {x: 612 - margin, y: 40}, color: rgb(0.8,0.8,0.8), thickness: 0.5 });
+  const footer = "Kenai Investments Inc.  •  www.kenaiinvest.com  •  (806) 359-3100";
+  const w = font.widthOfTextAtSize(footer, 10);
+  page.drawText(footer, { x: (612 - w)/2, y: 26, font, size: 10, color: rgb(0.35,0.35,0.35) });
 
   return await doc.save();
 }
