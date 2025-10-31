@@ -18,7 +18,7 @@ function titleCase(s: string) {
   return (s || "").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 function toGradeText(g: number | string | null) {
-  if (g == null) return "—";
+  if (g == null) return "-";
   const n = Number(g);
   return Number.isFinite(n) ? `${n.toFixed(1)} / 5` : String(g);
 }
@@ -104,13 +104,13 @@ function drawTable(
       size: fontSize,
     });
 
-    // Truncate desc to fit in remaining width
+    // Truncate desc to fit in remaining width (ASCII ellipsis)
     const maxDescWidth = width - colSymbol - colWeight - pad * 2;
     let d = desc;
     while (d && font.widthOfTextAtSize(d, fontSize) > maxDescWidth) {
       d = d.slice(0, -1);
     }
-    if (d && d.length < desc.length) d = d.replace(/\s+\S*$/, "") + "…";
+    if (d && d.length < desc.length) d = d.replace(/\s+\S*$/, "") + "...";
     if (d) {
       page.drawText(d, {
         x: x + colSymbol + pad,
@@ -137,11 +137,9 @@ function drawTable(
 
 /* Vector star (no Unicode glyph needed) */
 function drawStar(page: any, x: number, y: number, size: number, color = rgb(1, 0.75, 0)) {
-  // 5-point star path normalized around (0,0). We'll place its center manually.
   const path =
     "M0,-50 L14,-15 L47,-15 L19,7 L29,40 L0,22 L-29,40 L-19,7 L-47,-15 L-14,-15 Z";
-  // drawSvgPath accepts scale + translation via x/y; we scale so the outer radius ~= size
-  const scale = size / 50; // because our outer radius is 50 in path units
+  const scale = size / 50;
   page.drawSvgPath(path, { x, y, scale, color });
 }
 
@@ -193,8 +191,8 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
 
   y -= 100; // breathing room under logos
 
-  // Title
-  page.drawText("GradeYour401k — Personalized Report", {
+  // Title (ASCII hyphen)
+  page.drawText("GradeYour401k - Personalized Report", {
     x: margin,
     y,
     font: fontBold,
@@ -204,7 +202,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   y -= 26;
 
   // Meta line (left): Provider + Profile
-  const metaLeft = `Provider: ${titleCase(provider)}   •   Profile: ${titleCase(profile)}`;
+  const metaLeft = `Provider: ${titleCase(provider)}   -   Profile: ${titleCase(profile)}`;
   page.drawText(metaLeft, {
     x: margin,
     y,
@@ -219,9 +217,8 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   const gradeWidth = font.widthOfTextAtSize(gradeTxt, gradeSize) + 8 + 14; // 14px star approx
   const gx = 612 - margin - gradeWidth;
 
-  // Draw star centered on its own box: place center point
-  const starOuterRadiusPx = 7; // visual size of star
-  drawStar(page, gx + starOuterRadiusPx, y + 2, starOuterRadiusPx); // +2 for optical vertical alignment
+  const starOuterRadiusPx = 7;
+  drawStar(page, gx + starOuterRadiusPx, y + 2, starOuterRadiusPx);
 
   page.drawText(gradeTxt, {
     x: gx + 8 + starOuterRadiusPx * 2,
@@ -233,7 +230,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
 
   y -= 16;
 
-  // Optional date only (Client removed)
+  // Optional date only
   if (reportDate) {
     page.drawText(`Date: ${new Date(reportDate).toLocaleDateString()}`, {
       x: margin,
@@ -330,7 +327,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
 
   if (!drewDial) {
     const fgVal = 63;
-    page.drawText(`Fear & Greed Index: ${fgVal} — Greed`, {
+    page.drawText(`Fear & Greed Index: ${fgVal} - Greed`, {
       x: margin,
       y,
       font,
@@ -383,7 +380,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
 
   const steps = [
     "1) Log in to your 401(k) plan and make the recommended holding adjustments listed above.",
-    "2) If your plan doesn’t offer a specific symbol, replace it with a like-kind fund in the same asset class and mandate (e.g., large-cap growth ETF ↔ large-cap growth index fund).",
+    "2) If your plan doesn't offer a specific symbol, replace it with a like-kind fund in the same asset class and mandate (e.g., large-cap growth ETF <-> large-cap growth index fund).",
     "3) Log in to gradeyour401k.com to update your information, view past reports, or schedule a 401(k) Review with Kenai Investments.",
   ];
   steps.forEach((s) => {
@@ -407,8 +404,7 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     color: rgb(0.8, 0.8, 0.8),
     thickness: 0.5,
   });
-  const footer =
-    "Kenai Investments Inc.  •  www.kenaiinvest.com  •  (806) 359-3100";
+  const footer = "Kenai Investments Inc.  -  www.kenaiinvest.com  -  (806) 359-3100";
   const fw = font.widthOfTextAtSize(footer, 10);
   page.drawText(footer, {
     x: (612 - fw) / 2,
