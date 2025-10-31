@@ -1,3 +1,4 @@
+// src/lib/pdf.ts
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { FUND_LABELS } from "@/lib/funds";
 
@@ -134,6 +135,16 @@ function drawTable(
   return y;
 }
 
+/* Vector star (no Unicode glyph needed) */
+function drawStar(page: any, x: number, y: number, size: number, color = rgb(1, 0.75, 0)) {
+  // 5-point star path normalized around (0,0). We'll place its center manually.
+  const path =
+    "M0,-50 L14,-15 L47,-15 L19,7 L29,40 L0,22 L-29,40 L-19,7 L-47,-15 L-14,-15 Z";
+  // drawSvgPath accepts scale + translation via x/y; we scale so the outer radius ~= size
+  const scale = size / 50; // because our outer radius is 50 in path units
+  page.drawSvgPath(path, { x, y, scale, color });
+}
+
 export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   const {
     provider,
@@ -192,10 +203,8 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   });
   y -= 26;
 
-  // Meta line with star next to grade
-  const metaLeft = `Provider: ${titleCase(provider)}   •   Profile: ${titleCase(
-    profile
-  )}`;
+  // Meta line (left): Provider + Profile
+  const metaLeft = `Provider: ${titleCase(provider)}   •   Profile: ${titleCase(profile)}`;
   page.drawText(metaLeft, {
     x: margin,
     y,
@@ -204,27 +213,18 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     color: rgb(0.25, 0.25, 0.25),
   });
 
-  // Grade + star graphic on the right
+  // Grade (right) with vector star
   const gradeTxt = `Grade: ${toGradeText(grade)}`;
-  const star = "★"; // simple star glyph
-  const starSize = 14;
   const gradeSize = 11.5;
-
-  const gradeWidth =
-    font.widthOfTextAtSize(gradeTxt, gradeSize) +
-    6 +
-    fontBold.widthOfTextAtSize(star, starSize);
+  const gradeWidth = font.widthOfTextAtSize(gradeTxt, gradeSize) + 8 + 14; // 14px star approx
   const gx = 612 - margin - gradeWidth;
 
-  page.drawText(star, {
-    x: gx,
-    y: y - 1, // tiny optical tweak
-    font: fontBold,
-    size: starSize,
-    color: rgb(1, 0.75, 0), // golden
-  });
+  // Draw star centered on its own box: place center point
+  const starOuterRadiusPx = 7; // visual size of star
+  drawStar(page, gx + starOuterRadiusPx, y + 2, starOuterRadiusPx); // +2 for optical vertical alignment
+
   page.drawText(gradeTxt, {
-    x: gx + 6 + fontBold.widthOfTextAtSize(star, starSize),
+    x: gx + 8 + starOuterRadiusPx * 2,
     y,
     font,
     size: gradeSize,
@@ -285,7 +285,6 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   }
 
   const boxBottom = y - 6;
-  // Draw the box border around the whole recommended block
   page.drawRectangle({
     x: boxX,
     y: boxBottom,
@@ -330,7 +329,6 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   }
 
   if (!drewDial) {
-    // Simple fallback bar with static value
     const fgVal = 63;
     page.drawText(`Fear & Greed Index: ${fgVal} — Greed`, {
       x: margin,
@@ -360,7 +358,6 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     y -= 18;
   }
 
-  // Market commentary (static copy you can later swap dynamically)
   const commentary =
     "Commentary: Sentiment is tilting toward Greed, which often coincides with stronger momentum. " +
     "Maintain core diversification and avoid concentrated bets; rebalancing into targeted sector exposure " +
