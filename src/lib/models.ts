@@ -1,5 +1,6 @@
 // src/lib/models.ts
 import { query } from "@/lib/db";
+import { fetchFearGreed } from "@/lib/data";
 
 export type Provider = "Fidelity" | "Vanguard" | "Schwab" | "Voya" | "Other";
 export type Profile  = "Growth" | "Balanced" | "Conservative";
