@@ -54,9 +54,25 @@ export async function GET() {
       }
     }
 
+    // 3) Log success in cron_log
+    // Schema assumed:
+    // CREATE TABLE IF NOT EXISTS cron_log (
+    //   id BIGSERIAL PRIMARY KEY,
+    //   job_name TEXT NOT NULL,
+    //   ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    // );
+    await query(
+      `INSERT INTO cron_log (job_name, ran_at) VALUES ($1, NOW())`,
+      ["rebuild-models"]
+    );
+
     return NextResponse.json({ ok: true, metrics });
   } catch (e: any) {
     console.error("[cron/rebuild-models] error:", e?.message || e);
+
+    // (Optional) You can also log failures if you later add a status column.
+    // For now we only log successes to match the minimal schema.
+
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
 }
