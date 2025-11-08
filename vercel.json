@@ -1,5 +1,6 @@
 {
   "crons": [
+    { "path": "/api/cron/rebuild-models", "schedule": "15 23 * * 1-5" }
     { "path": "/api/report/cron", "schedule": "0 12 * * *" }
   ]
 }
