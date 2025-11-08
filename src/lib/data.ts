@@ -4,10 +4,13 @@ import { query } from "@/lib/db";
 /* ────────────────────────────────────────────────────────────
    Types
    ──────────────────────────────────────────────────────────── */
+type Provider = "Fidelity" | "Vanguard" | "Schwab" | "Voya" | "Other";
+type AssetClass = "Equity" | "Bond" | "Cash" | "Alt";
+
 type SymbolRow = {
   symbol: string;
-  provider: "Fidelity" | "Vanguard" | "Schwab" | "Voya" | "Other";
-  asset_class: "Equity" | "Bond" | "Cash" | "Alt";
+  provider: Provider;
+  asset_class: AssetClass;
   is_active: boolean;
 };
 
@@ -22,7 +25,7 @@ const FEAR_GREED_URL = process.env.FEAR_GREED_FEED_URL || "";
    ──────────────────────────────────────────────────────────── */
 
 /**
- * Fetch N trading days for each symbol (AlphaVantage → Stooq fallback).
+ * Fetch N trading days for each symbol (AlphaVantage → Stooq → Yahoo fallback).
  * Returns a map: symbol -> array of {date, close}, sorted ASC by date.
  */
 export async function fetchPricesForSymbols(
@@ -31,8 +34,6 @@ export async function fetchPricesForSymbols(
 ): Promise<TSMap> {
   const active = symbols.filter((s) => s.is_active);
   const out: TSMap = {};
-  // Basic rate limiting: Alpha Vantage free tier ~5 req/min. We'll do sequential AV,
-  // and use Stooq fallback for failures or mutual funds not covered.
   for (const s of active) {
     const ts = await fetchSeriesForSymbol(s.symbol, lookbackDays).catch(() => null);
     if (ts && ts.length) {
@@ -41,40 +42,49 @@ export async function fetchPricesForSymbols(
       console.warn(`[prices] no data for ${s.symbol}`);
       out[s.symbol] = [];
     }
-    // small delay to be courteous with AV limits
-    await sleep(1300);
+    // courteous pacing (AV free-tier is ~5 req/min)
+    await sleep(3000);
   }
   return out;
 }
 
 /**
- * Compute metrics & scores for `asof` (defaults to latest overlapping date across series)
- * and upsert into `symbol_metrics_daily`. Returns the asof used and row count written.
+ * Compute metrics & scores for `asof` and upsert into `symbol_metrics_daily`.
+ * Returns the asof used and row count written.
  */
 export async function computeAndStoreMetrics(
   symbols: SymbolRow[],
   tsMap: TSMap,
   explicitAsof?: string
 ): Promise<{ asof: string; written: number }> {
-  // Determine common asof (latest date present in ≥70% of series), or use explicit
-  const allDates = new Map<string, number>();
-  for (const series of Object.values(tsMap)) {
-    for (const b of series) {
-      allDates.set(b.date, (allDates.get(b.date) || 0) + 1);
-    }
+  // Determine asof using tolerant logic:
+  // 1) consensus date in >=70% of non-empty series
+  // 2) else latest date in ANY non-empty series
+  // 3) else prior business day (UTC)
+  const nonEmpty = Object.values(tsMap).filter((arr) => arr.length > 0);
+  if (!nonEmpty.length) {
+    throw new Error("No price series available for any symbol");
   }
+
   let asof = explicitAsof || "";
   if (!asof) {
-    const threshold = Math.ceil(Object.keys(tsMap).length * 0.7);
-    const sorted = [...allDates.entries()]
+    const counts = new Map<string, number>();
+    for (const series of nonEmpty) {
+      for (const b of series) counts.set(b.date, (counts.get(b.date) || 0) + 1);
+    }
+    const threshold = Math.ceil(nonEmpty.length * 0.7);
+    const consensus = [...counts.entries()]
       .filter(([, cnt]) => cnt >= threshold)
       .map(([d]) => d)
       .sort();
-    asof = sorted[sorted.length - 1];
-    if (!asof) {
-      throw new Error("No overlapping asof date found across timeseries");
+    if (consensus.length) {
+      asof = consensus[consensus.length - 1];
+    } else {
+      const latestPerSeries = nonEmpty.map((s) => s[s.length - 1].date).sort();
+      asof = latestPerSeries[latestPerSeries.length - 1];
     }
   }
+  if (!asof) asof = priorBusinessDayUTC();
 
   // Build per-symbol metric rows
   type Row = {
@@ -85,7 +95,7 @@ export async function computeAndStoreMetrics(
     ret_63d: number | null;
     vol_21d: number | null;
     trend_margin: number | null;
-    provider: SymbolRow["provider"];
+    provider: Provider;
   };
 
   const rows: Row[] = [];
@@ -94,32 +104,14 @@ export async function computeAndStoreMetrics(
   for (const s of symbols) {
     const series = tsMap[s.symbol] || [];
     if (!series.length) {
-      rows.push({
-        asof_date: asof,
-        symbol: s.symbol,
-        ret_1d: null,
-        ret_21d: null,
-        ret_63d: null,
-        vol_21d: null,
-        trend_margin: null,
-        provider: s.provider,
-      });
+      rows.push(emptyRow(asof, s));
       continue;
     }
     // Ensure ascending dates
     series.sort((a, b) => (a.date < b.date ? -1 : 1));
     const idx = series.findIndex((b) => b.date === asof);
     if (idx < 0) {
-      rows.push({
-        asof_date: asof,
-        symbol: s.symbol,
-        ret_1d: null,
-        ret_21d: null,
-        ret_63d: null,
-        vol_21d: null,
-        trend_margin: null,
-        provider: s.provider,
-      });
+      rows.push(emptyRow(asof, s));
       continue;
     }
 
@@ -132,7 +124,7 @@ export async function computeAndStoreMetrics(
     const ret_21d = safeRet(c21, c0);
     const ret_63d = safeRet(c63, c0);
 
-    // 21d realized volatility (non-annualized): stddev of daily returns over lookback 21
+    // 21d realized volatility (non-annualized)
     const windowStart = Math.max(0, idx - 21);
     const rets: number[] = [];
     for (let i = windowStart + 1; i <= idx; i++) {
@@ -165,9 +157,19 @@ export async function computeAndStoreMetrics(
     (byProvider[s.provider] ||= []).push(row);
   }
 
-  // Z-score per provider for ret_1d, ret_21d, ret_63d, vol_21d, trend_margin
-  const scored: { asof: string; symbol: string; ret_1d: number | null; ret_21d: number | null; ret_63d: number | null; vol_21d: number | null; trend_margin: number | null; score: number | null }[] = [];
-  for (const [provider, arr] of Object.entries(byProvider)) {
+  // Z-score per provider and compute composite score
+  const scored: {
+    asof: string;
+    symbol: string;
+    ret_1d: number | null;
+    ret_21d: number | null;
+    ret_63d: number | null;
+    vol_21d: number | null;
+    trend_margin: number | null;
+    score: number | null;
+  }[] = [];
+
+  for (const [, arr] of Object.entries(byProvider)) {
     const zs = zscoreBlock(arr, ["ret_1d", "ret_21d", "ret_63d", "vol_21d", "trend_margin"] as const);
     for (const z of zs) {
       // Composite score (clamp z's to ±3 first)
@@ -177,12 +179,7 @@ export async function computeAndStoreMetrics(
       const zvol = clamp(z.vol_21d ?? 0, -3, 3);
       const ztrd = clamp(z.trend_margin ?? 0, -3, 3);
 
-      const score =
-        0.15 * z1d +
-        0.35 * z21 +
-        0.35 * z63 +
-        0.10 * ztrd -
-        0.15 * zvol;
+      const score = 0.15 * z1d + 0.35 * z21 + 0.35 * z63 + 0.10 * ztrd - 0.15 * zvol;
 
       scored.push({
         asof,
@@ -202,18 +199,8 @@ export async function computeAndStoreMetrics(
   const chunks: string[] = [];
   scored.forEach((r, i) => {
     const base = i * 7;
-    chunks.push(
-      `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7})`
-    );
-    values.push(
-      r.asof,
-      r.symbol,
-      toPgNullable(r.ret_1d),
-      toPgNullable(r.ret_21d),
-      toPgNullable(r.ret_63d),
-      toPgNullable(r.vol_21d),
-      toPgNullable(r.trend_margin),
-    );
+    chunks.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7})`);
+    values.push(r.asof, r.symbol, toPgNullable(r.ret_1d), toPgNullable(r.ret_21d), toPgNullable(r.ret_63d), toPgNullable(r.vol_21d), toPgNullable(r.trend_margin));
   });
 
   let written = 0;
@@ -233,8 +220,7 @@ export async function computeAndStoreMetrics(
     await query(text, values);
     written = scored.length;
 
-    // Now update `score` in a second pass using a simple UPDATE with CASE (or insert into a temp, but keep simple)
-    // Build a temp map in JS and update per symbol (batched).
+    // Update score in batches
     const batchSize = 100;
     for (let i = 0; i < scored.length; i += batchSize) {
       const slice = scored.slice(i, i + batchSize);
@@ -250,14 +236,16 @@ export async function computeAndStoreMetrics(
           ${cases.map((c) => `WHEN ${c}`).join(" ")}
           ELSE score
         END
-        WHERE asof_date = ANY(${
-          // gather distinct dates for narrower WHERE
-          `ARRAY[${[...new Set(slice.map((r) => `'${r.asof}'`))].join(",")}]::date[]`
-        });
+        WHERE asof_date = ANY(${`ARRAY[${[...new Set(slice.map((r) => `'${r.asof}'`))].join(",")}]::date[]`});
       `;
       await query(sql, vals);
     }
   }
+
+  // Coverage log (useful for health checks)
+  const nonNullCount = scored.filter((r) => r.ret_21d !== null || r.ret_63d !== null).length;
+  const coverage = nonNullCount / (symbols.length || 1);
+  console.log(`[metrics] ${nonNullCount}/${symbols.length} symbols have data for ${asof} (coverage=${(coverage * 100).toFixed(1)}%)`);
 
   return { asof, written };
 }
@@ -266,7 +254,7 @@ export async function computeAndStoreMetrics(
  * Fetch Fear/Greed reading and persist. If FEAR_GREED_FEED_URL is unset or fails,
  * we return a placeholder and do not throw (so cron continues).
  */
-export async function fetchFearGreed(): Promise<{ reading: number; source: string } | null>  {
+export async function fetchFearGreed(): Promise<{ reading: number; source: string } | null> {
   if (!FEAR_GREED_URL) {
     console.warn("[fear_greed] FEAR_GREED_FEED_URL not set; skipping");
     return null;
@@ -298,73 +286,124 @@ export async function fetchFearGreed(): Promise<{ reading: number; source: strin
    ──────────────────────────────────────────────────────────── */
 
 async function fetchSeriesForSymbol(symbol: string, lookbackDays: number): Promise<DailyBar[]> {
-  // Try Alpha Vantage first
+  // 1) Alpha Vantage with throttle handling and fallback to non-adjusted
+  const avPayload = async (fn: "TIME_SERIES_DAILY_ADJUSTED" | "TIME_SERIES_DAILY") => {
+    const url = new URL("https://www.alphavantage.co/query");
+    url.searchParams.set("function", fn);
+    url.searchParams.set("symbol", symbol);
+    url.searchParams.set("outputsize", "compact");
+    url.searchParams.set("apikey", AV_KEY);
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) throw new Error(`AV HTTP ${res.status}`);
+    return res.json();
+  };
+
   if (AV_KEY) {
-    try {
-      const url = new URL("https://www.alphavantage.co/query");
-      url.searchParams.set("function", "TIME_SERIES_DAILY_ADJUSTED");
-      url.searchParams.set("symbol", symbol);
-      url.searchParams.set("outputsize", "compact"); // ~100 last days; we only need ~63-126; call twice if needed
-      url.searchParams.set("apikey", AV_KEY);
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      if (!res.ok) throw new Error(`AV HTTP ${res.status}`);
-      const json = await res.json();
-      const series = json["Time Series (Daily)"];
-      if (series && typeof series === "object") {
-        const bars: DailyBar[] = Object.keys(series).map((d) => ({
-          date: d,
-          close: Number(series[d]["5. adjusted close"]),
-        }));
-        bars.sort((a, b) => (a.date < b.date ? -1 : 1));
-        // If we need > 100 days, make a second call for "full" only when necessary
-        if (bars.length < lookbackDays) {
-          const url2 = new URL("https://www.alphavantage.co/query");
-          url2.searchParams.set("function", "TIME_SERIES_DAILY_ADJUSTED");
-          url2.searchParams.set("symbol", symbol);
-          url2.searchParams.set("outputsize", "full");
-          url2.searchParams.set("apikey", AV_KEY);
-          const res2 = await fetch(url2.toString(), { cache: "no-store" });
-          if (res2.ok) {
-            const json2 = await res2.json();
-            const series2 = json2["Time Series (Daily)"];
-            if (series2) {
-              const all: DailyBar[] = Object.keys(series2).map((d) => ({
-                date: d,
-                close: Number(series2[d]["5. adjusted close"]),
-              }));
-              all.sort((a, b) => (a.date < b.date ? -1 : 1));
-              return lastN(all, lookbackDays);
-            }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        let json = await avPayload("TIME_SERIES_DAILY_ADJUSTED");
+
+        // Throttle or error payloads
+        if (json?.Note) {
+          const wait = [15000, 30000, 60000][attempt];
+          console.warn(`[prices] AV throttle Note for ${symbol} — waiting ${wait}ms`);
+          await sleep(wait);
+          continue;
+        }
+        if (json?.["Error Message"]) {
+          json = await avPayload("TIME_SERIES_DAILY");
+          if (json?.["Error Message"] || !json?.["Time Series (Daily)"]) {
+            throw new Error("AV error or missing series");
           }
         }
-        return lastN(bars, lookbackDays);
+
+        const series = json["Time Series (Daily)"];
+        if (series && typeof series === "object") {
+          const bars: DailyBar[] = Object.keys(series).map((d) => ({
+            date: d,
+            close: Number(series[d]["5. adjusted close"] ?? series[d]["4. close"]),
+          }));
+          bars.sort((a, b) => (a.date < b.date ? -1 : 1));
+          if (bars.length < lookbackDays) {
+            // Try "full" once to extend history
+            const url2 = new URL("https://www.alphavantage.co/query");
+            url2.searchParams.set("function", "TIME_SERIES_DAILY");
+            url2.searchParams.set("symbol", symbol);
+            url2.searchParams.set("outputsize", "full");
+            url2.searchParams.set("apikey", AV_KEY);
+            const res2 = await fetch(url2.toString(), { cache: "no-store" });
+            if (res2.ok) {
+              const json2 = await res2.json();
+              const series2 = json2?.["Time Series (Daily)"];
+              if (series2) {
+                const all: DailyBar[] = Object.keys(series2).map((d) => ({
+                  date: d,
+                  close: Number(series2[d]["4. close"]),
+                }));
+                all.sort((a, b) => (a.date < b.date ? -1 : 1));
+                return lastN(all, lookbackDays);
+              }
+            }
+          }
+          return lastN(bars, lookbackDays);
+        }
+
+        throw new Error("AV unexpected payload");
+      } catch (e) {
+        console.warn(`[prices] AV failed for ${symbol}:`, (e as Error).message);
+        // Continue to other sources after attempts
       }
-      throw new Error("Alpha Vantage: unexpected payload");
-    } catch (e) {
-      console.warn(`[prices] AV failed for ${symbol}:`, (e as Error).message);
     }
   }
 
-  // Fallback: Stooq CSV (works for most ETFs/indices; mutual funds coverage varies)
+  // 2) Stooq CSV (use `.us` suffix for US listings)
   try {
-    const stooq = `https://stooq.com/q/d/l/?s=${symbol.toLowerCase()}&i=d`;
+    const stooqSym = `${symbol.toLowerCase()}.us`;
+    const stooq = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSym)}&i=d`;
     const res = await fetch(stooq, { cache: "no-store" });
     if (!res.ok) throw new Error(`Stooq HTTP ${res.status}`);
     const text = await res.text();
     const lines = text.trim().split("\n");
-    // CSV header: Date,Open,High,Low,Close,Volume
-    const bars: DailyBar[] = lines
-      .slice(1)
-      .map((ln) => ln.split(","))
-      .filter((cols) => cols.length >= 5)
-      .map((cols) => ({ date: cols[0], close: Number(cols[4]) }))
-      .filter((b) => isFinite(b.close));
-    bars.sort((a, b) => (a.date < b.date ? -1 : 1));
-    return lastN(bars, lookbackDays);
+    if (lines.length > 1 && lines[0].toLowerCase().startsWith("date,")) {
+      const bars: DailyBar[] = lines
+        .slice(1)
+        .map((ln) => ln.split(","))
+        .filter((cols) => cols.length >= 5)
+        .map((cols) => ({ date: cols[0], close: Number(cols[4]) }))
+        .filter((b) => isFinite(b.close));
+      bars.sort((a, b) => (a.date < b.date ? -1 : 1));
+      if (bars.length) return lastN(bars, lookbackDays);
+    }
   } catch (e) {
     console.warn(`[prices] Stooq failed for ${symbol}:`, (e as Error).message);
   }
 
+  // 3) Yahoo CSV fallback
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const twoYears = 60 * 60 * 24 * 365 * 2;
+    const url = `https://query1.finance.yahoo.com/v7/finance/download/${encodeURIComponent(
+      symbol
+    )}?period1=${now - twoYears}&period2=${now}&interval=1d&events=history&includeAdjustedClose=true`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
+    const csv = await res.text();
+    const lines = csv.trim().split("\n");
+    if (lines.length > 1 && lines[0].toLowerCase().startsWith("date,")) {
+      const bars: DailyBar[] = lines
+        .slice(1)
+        .map((ln) => ln.split(","))
+        .filter((cols) => cols.length >= 7 && cols[5] !== "null")
+        .map((cols) => ({ date: cols[0], close: Number(cols[5] /* Adj Close */) }))
+        .filter((b) => isFinite(b.close));
+      bars.sort((a, b) => (a.date < b.date ? -1 : 1));
+      if (bars.length) return lastN(bars, lookbackDays);
+    }
+  } catch (e) {
+    console.warn(`[prices] Yahoo failed for ${symbol}:`, (e as Error).message);
+  }
+
+  // 4) Give up for this symbol
   return [];
 }
 
@@ -397,6 +436,17 @@ function findBySymbol<T extends { symbol: string }>(arr: T[], sym: string) {
   return arr.find((x) => x.symbol === sym);
 }
 
+const emptyRow = (asof: string, s: SymbolRow) => ({
+  asof_date: asof,
+  symbol: s.symbol,
+  ret_1d: null,
+  ret_21d: null,
+  ret_63d: null,
+  vol_21d: null,
+  trend_margin: null,
+  provider: s.provider,
+});
+
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const lastN = <T,>(arr: T[], n: number) => arr.slice(Math.max(0, arr.length - n));
@@ -415,6 +465,14 @@ const todayUTC = () => {
   const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 };
+
+function priorBusinessDayUTC(ref = new Date()): string {
+  const d = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate()));
+  let day = d.getUTCDay(); // 0 Sun .. 6 Sat
+  if (day === 0) d.setUTCDate(d.getUTCDate() - 2); // Sunday -> Friday
+  else if (day === 6) d.setUTCDate(d.getUTCDate() - 1); // Saturday -> Friday
+  return d.toISOString().slice(0, 10);
+}
 
 const toPgNullable = (x: number | null) => (isFinite(x as number) ? x : null);
 
