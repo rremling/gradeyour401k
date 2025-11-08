@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
 import { generatePdfBuffer } from "@lib/pdf";
-
+import { fetchLatestModel } from "@/lib/models-client"; // <-- NEW: server-side model fetch
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +102,6 @@ function parseRows(raw: unknown): Array<{ symbol: string; weight: number }> {
     return [];
   }
 }
-
 
 async function sendEmailViaResend(params: {
   to: string;
@@ -224,15 +223,38 @@ export async function POST(req: NextRequest) {
     };
     const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
 
+    // --- NEW: fetch the latest model + sentiment server-side ----------------
+    const providerForModel: string = preview.provider_display || preview.provider || "Fidelity";
+    const profileForModel: string = preview.profile || "Balanced";
+
+    let model: Awaited<ReturnType<typeof fetchLatestModel>> | null = null;
+    try {
+      model = await fetchLatestModel(providerForModel, profileForModel);
+    } catch (err) {
+      console.warn("[report] models/latest fetch failed:", err);
+      model = null; // don’t fail the whole report if model fetch hiccups
+    }
+
+    // --- Generate PDF (pass model data through) -----------------------------
     const pdfBytes = await generatePdfBuffer({
-      provider: preview.provider_display || preview.provider || "",
-      profile: preview.profile || "",
+      provider: providerForModel,
+      profile: profileForModel,
       grade,
       holdings: rows,
       logoUrl: "https://i.imgur.com/DMCbj99.png",
       clientName: preview.profile || undefined,
       reportDate: preview.created_at || undefined,
-    });
+
+      // NEW: add model data for the PDF template to render (kept optional)
+      // Cast as any to avoid touching @lib/pdf types right now.
+      ...(model
+        ? ({
+            model_asof: model.asof,
+            model_lines: model.lines,
+            model_fear_greed: model.fear_greed, // { asof_date, reading } | null
+          } as any)
+        : ({} as any)),
+    } as any);
 
     await sendEmailViaResend({
       to: toEmail,
