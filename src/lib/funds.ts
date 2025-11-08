@@ -45,6 +45,8 @@ export const FUND_LABELS: Record<string, string> = {
   FBCG:  "Fidelity® Blue Chip Growth ETF",
   FBCV:  "Fidelity® Blue Chip Value ETF",
   FDVV:  "Fidelity® High Dividend ETF",
+  FDCPX: "Fidelity® Select Tech Hardware Portfolio",
+  SPAXX: "Fidelity® Government Money Market Fund",
 
   // Vanguard (subset)
   VOO:   "Vanguard S&P 500 ETF",
