@@ -31,7 +31,13 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "No approved model found" }, { status: 404 });
     }
 
-    const fmt = (d?: string | null) => (d ? d.slice(0, 10) : null);
+    // Defensive formatter: handles Date objects, ISO strings, or null
+    const fmt = (d?: string | Date | null) => {
+      if (!d) return null;
+      if (typeof d === "string") return d.slice(0, 10);
+      if (d instanceof Date) return d.toISOString().slice(0, 10);
+      return String(d).slice(0, 10);
+    };
 
     return NextResponse.json({
       ok: true,
@@ -43,6 +49,7 @@ export async function GET(req: Request) {
       lines: model.lines,
     });
   } catch (e: any) {
+    console.error("[models/latest] error:", e);
     return NextResponse.json({ ok: false, error: e?.message || "Failed" }, { status: 500 });
   }
 }
