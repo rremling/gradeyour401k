@@ -61,7 +61,8 @@ export async function getLatestApprovedModel(
 }
 
 export async function getLatestFearGreed(): Promise<{ asof_date: string; reading: number } | null> {
-  const fg = await query<{ asof_date: string; reading: number }>(
+  // 1) Try cache first
+  const fg1 = await query<{ asof_date: string; reading: number }>(
     `
     SELECT asof_date, reading
     FROM fear_greed_cache
@@ -69,5 +70,20 @@ export async function getLatestFearGreed(): Promise<{ asof_date: string; reading
     LIMIT 1
     `
   );
-  return fg.rows[0] ?? null;
+  if (fg1.rows[0]) return fg1.rows[0];
+
+  // 2) If missing, pull from feed and persist (no-throw)
+  const pulled = await fetchFearGreed().catch(() => null);
+  if (!pulled) return null;
+
+  // 3) Read back what we just wrote (normalize shape)
+  const fg2 = await query<{ asof_date: string; reading: number }>(
+    `
+    SELECT asof_date, reading
+    FROM fear_greed_cache
+    ORDER BY asof_date DESC
+    LIMIT 1
+    `
+  );
+  return fg2.rows[0] ?? null;
 }
