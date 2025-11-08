@@ -58,6 +58,10 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
           );
         })}
       </ol>
+    </div>
+  ); // <-- ADDED
+}       // <-- ADDED
+
 export default function ResultsClient() {
   const sp = useSearchParams();
 
