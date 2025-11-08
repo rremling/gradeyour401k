@@ -46,7 +46,13 @@ export async function GET(req: Request) {
       profile: model.profile,
       notes: model.notes,
       fear_greed: fg ? { asof_date: fmt(fg.asof_date), reading: fg.reading } : null,
-      lines: model.lines,
+      // Ensure numeric weights
+      lines: model.lines.map((l) => ({
+        rank: l.rank,
+        symbol: l.symbol,
+        weight: typeof (l as any).weight === "string" ? Number((l as any).weight) : l.weight,
+        role: l.role,
+      })),
     });
   } catch (e: any) {
     console.error("[models/latest] error:", e);
