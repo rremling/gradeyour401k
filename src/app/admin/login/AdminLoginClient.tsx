@@ -42,6 +42,25 @@ function fmtDate(d?: string | null) {
   }
 }
 
+/** New: nice date-time in Central Time (US) */
+function fmtDateTimeCT(iso?: string | null) {
+  if (!iso) return "—";
+  try {
+    const dt = new Date(iso);
+    const s = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(dt);
+    return `${s} CT`;
+  } catch {
+    return iso;
+  }
+}
+
 export default function AdminLoginClient() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -64,6 +83,10 @@ export default function AdminLoginClient() {
 
   // local editable copies
   const [drafts, setDrafts] = useState<Record<string, ClientRow>>({});
+
+  // NEW: cron last-run state
+  const [cronRanAt, setCronRanAt] = useState<string | null>(null);
+  const [cronLoading, setCronLoading] = useState<boolean>(false);
 
   // ✅ Client-side ranking (do NOT filter away non-matches)
   // Bring matches to the top: startsWith > includes > none; then stable by email
@@ -109,6 +132,31 @@ export default function AdminLoginClient() {
         setIsFetching(false);
       }
     })();
+  }, []);
+
+  // NEW: fetch last cron run for rebuild-models
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setCronLoading(true);
+        // Expected response: { ok: true, job: "rebuild-models", ran_at: "2025-11-08T05:15:00.000Z" }
+        const res = await fetch(`/api/admin/cron-last?job=rebuild-models`, {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const j = await res.json().catch(() => ({}));
+        if (!cancelled) {
+          setCronRanAt(j?.ran_at ?? null);
+        }
+      } catch {
+        if (!cancelled) setCronRanAt(null);
+      } finally {
+        if (!cancelled) setCronLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   async function onLogin(e: React.FormEvent) {
@@ -263,7 +311,15 @@ export default function AdminLoginClient() {
   return (
     <main className="mx-auto max-w-5xl p-6 space-y-4">
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Advisor CRM</h1>
+        {/* Title + cron timestamp (NEW line lives right under the title) */}
+        <div>
+          <h1 className="text-2xl font-semibold">Advisor CRM</h1>
+          <div className="mt-1 text-xs text-slate-600">
+            Models last updated:{" "}
+            {cronLoading ? "Loading…" : fmtDateTimeCT(cronRanAt)}
+          </div>
+        </div>
+
         <div className="flex items-center gap-2">
           <input
             className="border rounded-md px-3 py-2 text-sm w-64"
