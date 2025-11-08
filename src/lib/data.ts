@@ -21,11 +21,31 @@ const AV_KEY = process.env.ALPHA_VANTAGE_API_KEY || "";
 const FEAR_GREED_URL = process.env.FEAR_GREED_FEED_URL || "";
 
 /* ────────────────────────────────────────────────────────────
+   Proxy map: price mutual funds by liquid ETF equivalents
+   (v1 defaults; tweak as you like)
+   ──────────────────────────────────────────────────────────── */
+const PRICE_PROXY: Record<string, string> = {
+  // Fidelity mutual funds -> ETFs
+  FXAIX: "VOO",      // S&P 500
+  FSKAX: "ITOT",     // US total market
+  FTIHX: "IXUS",     // Intl ex-US total
+  FXNAX: "AGG",      // US aggregate bond
+  STIPX: "VTIP",     // Short TIPS
+  FUMBX: "VCSH",     // Short-term IG corp (closest liquid sleeve)
+
+  // Fidelity ETFs with thin alt sources (fallbacks)
+  FBND: "AGG",
+
+  // Add any VOYA/CIT tickers here mapped to closest ETFs when you onboard them
+  // e.g., VOYA_SPPX_CIT: "VOO"
+};
+
+/* ────────────────────────────────────────────────────────────
    Public API used by your cron route
    ──────────────────────────────────────────────────────────── */
 
 /**
- * Fetch N trading days for each symbol (AlphaVantage → Stooq → Yahoo fallback).
+ * Fetch N trading days for each symbol (AV → Stooq; with ETF proxy fallback).
  * Returns a map: symbol -> array of {date, close}, sorted ASC by date.
  */
 export async function fetchPricesForSymbols(
@@ -35,7 +55,7 @@ export async function fetchPricesForSymbols(
   const active = symbols.filter((s) => s.is_active);
   const out: TSMap = {};
   for (const s of active) {
-    const ts = await fetchSeriesForSymbol(s.symbol, lookbackDays).catch(() => null);
+    const ts = await fetchSeriesForSymbolWithProxy(s.symbol, lookbackDays);
     if (ts && ts.length) {
       out[s.symbol] = ts;
     } else {
@@ -50,17 +70,13 @@ export async function fetchPricesForSymbols(
 
 /**
  * Compute metrics & scores for `asof` and upsert into `symbol_metrics_daily`.
- * Returns the asof used and row count written.
  */
 export async function computeAndStoreMetrics(
   symbols: SymbolRow[],
   tsMap: TSMap,
   explicitAsof?: string
 ): Promise<{ asof: string; written: number }> {
-  // Determine asof using tolerant logic:
-  // 1) consensus date in >=70% of non-empty series
-  // 2) else latest date in ANY non-empty series
-  // 3) else prior business day (UTC)
+  // Determine asof (consensus ≥70% → latest of any → prior business day)
   const nonEmpty = Object.values(tsMap).filter((arr) => arr.length > 0);
   if (!nonEmpty.length) {
     throw new Error("No price series available for any symbol");
@@ -242,7 +258,7 @@ export async function computeAndStoreMetrics(
     }
   }
 
-  // Coverage log (useful for health checks)
+  // Coverage log
   const nonNullCount = scored.filter((r) => r.ret_21d !== null || r.ret_63d !== null).length;
   const coverage = nonNullCount / (symbols.length || 1);
   console.log(`[metrics] ${nonNullCount}/${symbols.length} symbols have data for ${asof} (coverage=${(coverage * 100).toFixed(1)}%)`);
@@ -251,8 +267,7 @@ export async function computeAndStoreMetrics(
 }
 
 /**
- * Fetch Fear/Greed reading and persist. If FEAR_GREED_FEED_URL is unset or fails,
- * we return a placeholder and do not throw (so cron continues).
+ * Fetch Fear/Greed reading and persist (optional; non-fatal).
  */
 export async function fetchFearGreed(): Promise<{ reading: number; source: string } | null> {
   if (!FEAR_GREED_URL) {
@@ -284,6 +299,21 @@ export async function fetchFearGreed(): Promise<{ reading: number; source: strin
 /* ────────────────────────────────────────────────────────────
    Helpers: fetching & math
    ──────────────────────────────────────────────────────────── */
+
+async function fetchSeriesForSymbolWithProxy(symbol: string, lookbackDays: number): Promise<DailyBar[]> {
+  // Try the symbol itself
+  let ts = await fetchSeriesForSymbol(symbol, lookbackDays);
+  if (ts.length) return ts;
+
+  // Try an ETF proxy if defined
+  const proxy = PRICE_PROXY[symbol.toUpperCase()];
+  if (proxy && proxy !== symbol) {
+    console.warn(`[prices] using proxy ${proxy} for ${symbol}`);
+    ts = await fetchSeriesForSymbol(proxy, lookbackDays);
+    if (ts.length) return ts;
+  }
+  return [];
+}
 
 async function fetchSeriesForSymbol(symbol: string, lookbackDays: number): Promise<DailyBar[]> {
   // 1) Alpha Vantage with throttle handling and fallback to non-adjusted
@@ -378,32 +408,7 @@ async function fetchSeriesForSymbol(symbol: string, lookbackDays: number): Promi
     console.warn(`[prices] Stooq failed for ${symbol}:`, (e as Error).message);
   }
 
-  // 3) Yahoo CSV fallback
-  try {
-    const now = Math.floor(Date.now() / 1000);
-    const twoYears = 60 * 60 * 24 * 365 * 2;
-    const url = `https://query1.finance.yahoo.com/v7/finance/download/${encodeURIComponent(
-      symbol
-    )}?period1=${now - twoYears}&period2=${now}&interval=1d&events=history&includeAdjustedClose=true`;
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
-    const csv = await res.text();
-    const lines = csv.trim().split("\n");
-    if (lines.length > 1 && lines[0].toLowerCase().startsWith("date,")) {
-      const bars: DailyBar[] = lines
-        .slice(1)
-        .map((ln) => ln.split(","))
-        .filter((cols) => cols.length >= 7 && cols[5] !== "null")
-        .map((cols) => ({ date: cols[0], close: Number(cols[5] /* Adj Close */) }))
-        .filter((b) => isFinite(b.close));
-      bars.sort((a, b) => (a.date < b.date ? -1 : 1));
-      if (bars.length) return lastN(bars, lookbackDays);
-    }
-  } catch (e) {
-    console.warn(`[prices] Yahoo failed for ${symbol}:`, (e as Error).message);
-  }
-
-  // 4) Give up for this symbol
+  // 3) Give up for this symbol
   return [];
 }
 
@@ -480,13 +485,6 @@ const toPgNullable = (x: number | null) => (isFinite(x as number) ? x : null);
    Convenience orchestrator (optional)
    ──────────────────────────────────────────────────────────── */
 
-/**
- * Full pipeline helper you can call from the cron:
- *   1) load active symbols
- *   2) fetch prices
- *   3) compute metrics & write
- *   4) fetch fear/greed & store
- */
 export async function runDailyMetricsPipeline() {
   const symbols: SymbolRow[] =
     (await query<SymbolRow>(`SELECT symbol, provider, asset_class, is_active FROM symbols WHERE is_active = true`))
