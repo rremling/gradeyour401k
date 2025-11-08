@@ -31,20 +31,16 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "No approved model found" }, { status: 404 });
     }
 
+    const fmt = (d?: string | null) => (d ? d.slice(0, 10) : null);
+
     return NextResponse.json({
       ok: true,
-      asof: model.asof_date, // keep as returned; UI can slice to YYYY-MM-DD if desired
+      asof: fmt(model.asof_date),
       provider: model.provider,
       profile: model.profile,
       notes: model.notes,
-      fear_greed: fg,     // { asof_date, reading } | null
-      // ---- ONLY CHANGE: ensure weight is a number ----
-      lines: model.lines.map((l) => ({
-        rank: l.rank,
-        symbol: l.symbol,
-        weight: typeof (l as any).weight === "string" ? Number((l as any).weight) : l.weight,
-        role: l.role,
-      })),
+      fear_greed: fg ? { asof_date: fmt(fg.asof_date), reading: fg.reading } : null,
+      lines: model.lines,
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Failed" }, { status: 500 });
