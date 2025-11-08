@@ -11,6 +11,11 @@ export type PdfArgs = {
   bullUrl?: string;           // Kenai bull logo (PNG recommended)
   fearGreedImageUrl?: string; // optional PNG/JPG for dial
   reportDate?: string | Date;
+
+  // NEW (optional) - supplied by your server route
+  model_asof?: string | Date | null;
+  model_lines?: Array<{ rank?: number; symbol: string; weight: number; role?: string | null }>;
+  model_fear_greed?: { asof_date: string | Date | null; reading: number } | null;
 };
 
 /* ───────── helpers ───────── */
@@ -24,7 +29,14 @@ function toGradeText(g: number | string | null) {
 }
 const descFor = (sym: string) => FUND_LABELS[(sym || "").toUpperCase().trim()];
 
-/* Static: Fidelity / Growth */
+function fmtDate(d?: string | Date | null) {
+  if (!d) return "—";
+  if (typeof d === "string") return d.slice(0, 10);
+  if (d instanceof Date) return d.toISOString().slice(0, 10);
+  return String(d).slice(0, 10);
+}
+
+/* Static fallback (kept as last resort) */
 function staticRecommended(provider: string, profile: string) {
   const p = (provider || "").toLowerCase();
   const r = (profile || "").toLowerCase();
@@ -42,7 +54,7 @@ function staticRecommended(provider: string, profile: string) {
 /* Table drawer (lighter zebra, non-overlapping) */
 function drawTable(
   page: any,
-  rows: Array<{ symbol: string; weight: number }>,
+  rows: Array<{ symbol: string; weight: number }>, // weight in PERCENT
   y: number,
   font: any,
   fontBold: any
@@ -121,7 +133,7 @@ function drawTable(
       });
     }
 
-    const wTxt = `${Number(r.weight || 0).toFixed(1)}%`;
+    const wTxt = `${Number(r.weight || 0).toFixed(1)}%`; // weight already percent
     const wWidth = font.widthOfTextAtSize(wTxt, fontSize);
     page.drawText(wTxt, {
       x: x + width - pad - wWidth,
@@ -153,6 +165,11 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     bullUrl,
     fearGreedImageUrl,
     reportDate,
+
+    // NEW (optional)
+    model_asof,
+    model_lines,
+    model_fear_greed,
   } = args;
 
   const doc = await PDFDocument.create();
@@ -254,20 +271,35 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   y = drawTable(page, holdings || [], y, font, fontBold);
   y -= 28;
 
-  /* ───────── Section: Recommended (boxed) ───────── */
-  page.drawText("RECOMMENDED HOLDINGS (Fidelity / Growth)", {
-    x: margin,
-    y,
-    font: fontBold,
-    size: 13,
-  });
+  /* ───────── Section: Recommended (dynamic if available) ───────── */
+  const recTitleProvider = titleCase(provider);
+  const recTitleProfile = titleCase(profile);
+  const modelAsOfStr = model_asof ? fmtDate(model_asof) : null;
+
+  page.drawText(
+    modelAsOfStr
+      ? `RECOMMENDED HOLDINGS (${recTitleProvider} / ${recTitleProfile} - as of ${modelAsOfStr})`
+      : `RECOMMENDED HOLDINGS (${recTitleProvider} / ${recTitleProfile})`,
+    { x: margin, y, font: fontBold, size: 13 }
+  );
   y -= 10;
 
   const boxX = 44;
   const boxW = 612 - boxX * 2;
   const boxTop = y + 6;
 
-  const recRows = staticRecommended(provider, profile);
+  // If you have live model_lines, use those; weights are in FRACTION -> convert to percent
+  let recRows: Array<{ symbol: string; weight: number }> = [];
+  if (Array.isArray(model_lines) && model_lines.length) {
+    recRows = model_lines.map((ln) => ({
+      symbol: ln.symbol,
+      weight: (Number(ln.weight) || 0) * 100, // convert to percent for table renderer
+    }));
+  } else {
+    // fallback to your legacy static block (rare)
+    recRows = staticRecommended(provider, profile);
+  }
+
   if (recRows.length) {
     y = drawTable(page, recRows, y, font, fontBold);
   } else {
@@ -325,9 +357,18 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     } catch {}
   }
 
+  // Use live FG value if available, else fallback to 63
+  const fgValRaw = model_fear_greed?.reading;
+  const fgVal = Math.max(0, Math.min(100, Number.isFinite(Number(fgValRaw)) ? Number(fgValRaw) : 63));
+  const fgLabel =
+    fgVal < 25 ? "Extreme Fear"
+      : fgVal < 45 ? "Fear"
+      : fgVal < 55 ? "Neutral"
+      : fgVal < 75 ? "Greed"
+      : "Extreme Greed";
+
   if (!drewDial) {
-    const fgVal = 63;
-    page.drawText(`Fear & Greed Index: ${fgVal} - Greed`, {
+    page.drawText(`Fear & Greed Index: ${fgVal} - ${fgLabel}`, {
       x: margin,
       y,
       font,
@@ -356,10 +397,9 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   }
 
   const commentary =
-    "Commentary: Sentiment is tilting toward Greed, which often coincides with stronger momentum. " +
-    "Maintain core diversification and avoid concentrated bets; rebalancing into targeted sector exposure " +
-    "should be paced and rules-based. Long-term investors should emphasize quality, cash-flow resilience, " +
-    "and keep adequate short-term reserves to avoid forced selling in pullbacks.";
+    "Commentary: Sentiment can swing quickly. Maintain core diversification and avoid concentrated bets; " +
+    "rebalancing into targeted sector exposure should be paced and rules-based. Long-term investors should emphasize " +
+    "quality, cash-flow resilience, and keep adequate short-term reserves to avoid forced selling in pullbacks.";
   const wrap = (t: string, max = 95) => t.match(new RegExp(`.{1,${max}}(\\s|$)`, "g")) || [t];
   wrap(commentary).forEach((line) => {
     page.drawText(line.trim(), {
