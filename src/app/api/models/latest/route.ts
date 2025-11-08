@@ -33,12 +33,18 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      asof: model.asof_date,
+      asof: model.asof_date, // keep as returned; UI can slice to YYYY-MM-DD if desired
       provider: model.provider,
       profile: model.profile,
       notes: model.notes,
       fear_greed: fg,     // { asof_date, reading } | null
-      lines: model.lines, // [{rank, symbol, weight, role}]
+      // ---- ONLY CHANGE: ensure weight is a number ----
+      lines: model.lines.map((l) => ({
+        rank: l.rank,
+        symbol: l.symbol,
+        weight: typeof (l as any).weight === "string" ? Number((l as any).weight) : l.weight,
+        role: l.role,
+      })),
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Failed" }, { status: 500 });
