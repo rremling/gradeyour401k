@@ -17,35 +17,14 @@ type SymbolRow = {
 type DailyBar = { date: string; close: number };
 type TSMap = Record<string, DailyBar[]>;
 
-const AV_KEY = process.env.ALPHA_VANTAGE_API_KEY || "";
 const FEAR_GREED_URL = process.env.FEAR_GREED_FEED_URL || "";
-
-/* ────────────────────────────────────────────────────────────
-   Proxy map: price mutual funds by liquid ETF equivalents
-   (v1 defaults; tweak as you like)
-   ──────────────────────────────────────────────────────────── */
-const PRICE_PROXY: Record<string, string> = {
-  // Fidelity mutual funds -> ETFs
-  FXAIX: "VOO",      // S&P 500
-  FSKAX: "ITOT",     // US total market
-  FTIHX: "IXUS",     // Intl ex-US total
-  FXNAX: "AGG",      // US aggregate bond
-  STIPX: "VTIP",     // Short TIPS
-  FUMBX: "VCSH",     // Short-term IG corp (closest liquid sleeve)
-
-  // Fidelity ETFs with thin alt sources (fallbacks)
-  FBND: "AGG",
-
-  // Add any VOYA/CIT tickers here mapped to closest ETFs when you onboard them
-  // e.g., VOYA_SPPX_CIT: "VOO"
-};
 
 /* ────────────────────────────────────────────────────────────
    Public API used by your cron route
    ──────────────────────────────────────────────────────────── */
 
 /**
- * Fetch N trading days for each symbol (AV → Stooq; with ETF proxy fallback).
+ * Fetch N trading days for each symbol (Stooq-only).
  * Returns a map: symbol -> array of {date, close}, sorted ASC by date.
  */
 export async function fetchPricesForSymbols(
@@ -55,21 +34,20 @@ export async function fetchPricesForSymbols(
   const active = symbols.filter((s) => s.is_active);
   const out: TSMap = {};
   for (const s of active) {
-    const ts = await fetchSeriesForSymbolWithProxy(s.symbol, lookbackDays);
+    const ts = await fetchSeriesForSymbol(s.symbol, lookbackDays).catch(() => null);
     if (ts && ts.length) {
       out[s.symbol] = ts;
     } else {
       console.warn(`[prices] no data for ${s.symbol}`);
       out[s.symbol] = [];
     }
-    // courteous pacing (AV free-tier is ~5 req/min)
-    await sleep(3000);
   }
   return out;
 }
 
 /**
  * Compute metrics & scores for `asof` and upsert into `symbol_metrics_daily`.
+ * Returns the asof used and row count written.
  */
 export async function computeAndStoreMetrics(
   symbols: SymbolRow[],
@@ -258,7 +236,7 @@ export async function computeAndStoreMetrics(
     }
   }
 
-  // Coverage log
+  // Coverage log (useful for health checks)
   const nonNullCount = scored.filter((r) => r.ret_21d !== null || r.ret_63d !== null).length;
   const coverage = nonNullCount / (symbols.length || 1);
   console.log(`[metrics] ${nonNullCount}/${symbols.length} symbols have data for ${asof} (coverage=${(coverage * 100).toFixed(1)}%)`);
@@ -267,7 +245,8 @@ export async function computeAndStoreMetrics(
 }
 
 /**
- * Fetch Fear/Greed reading and persist (optional; non-fatal).
+ * Fetch Fear/Greed reading and persist. If FEAR_GREED_FEED_URL is unset or fails,
+ * we return null and do NOT throw (cron continues).
  */
 export async function fetchFearGreed(): Promise<{ reading: number; source: string } | null> {
   if (!FEAR_GREED_URL) {
@@ -300,93 +279,8 @@ export async function fetchFearGreed(): Promise<{ reading: number; source: strin
    Helpers: fetching & math
    ──────────────────────────────────────────────────────────── */
 
-async function fetchSeriesForSymbolWithProxy(symbol: string, lookbackDays: number): Promise<DailyBar[]> {
-  // Try the symbol itself
-  let ts = await fetchSeriesForSymbol(symbol, lookbackDays);
-  if (ts.length) return ts;
-
-  // Try an ETF proxy if defined
-  const proxy = PRICE_PROXY[symbol.toUpperCase()];
-  if (proxy && proxy !== symbol) {
-    console.warn(`[prices] using proxy ${proxy} for ${symbol}`);
-    ts = await fetchSeriesForSymbol(proxy, lookbackDays);
-    if (ts.length) return ts;
-  }
-  return [];
-}
-
 async function fetchSeriesForSymbol(symbol: string, lookbackDays: number): Promise<DailyBar[]> {
-  // 1) Alpha Vantage with throttle handling and fallback to non-adjusted
-  const avPayload = async (fn: "TIME_SERIES_DAILY_ADJUSTED" | "TIME_SERIES_DAILY") => {
-    const url = new URL("https://www.alphavantage.co/query");
-    url.searchParams.set("function", fn);
-    url.searchParams.set("symbol", symbol);
-    url.searchParams.set("outputsize", "compact");
-    url.searchParams.set("apikey", AV_KEY);
-    const res = await fetch(url.toString(), { cache: "no-store" });
-    if (!res.ok) throw new Error(`AV HTTP ${res.status}`);
-    return res.json();
-  };
-
-  if (AV_KEY) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        let json = await avPayload("TIME_SERIES_DAILY_ADJUSTED");
-
-        // Throttle or error payloads
-        if (json?.Note) {
-          const wait = [15000, 30000, 60000][attempt];
-          console.warn(`[prices] AV throttle Note for ${symbol} — waiting ${wait}ms`);
-          await sleep(wait);
-          continue;
-        }
-        if (json?.["Error Message"]) {
-          json = await avPayload("TIME_SERIES_DAILY");
-          if (json?.["Error Message"] || !json?.["Time Series (Daily)"]) {
-            throw new Error("AV error or missing series");
-          }
-        }
-
-        const series = json["Time Series (Daily)"];
-        if (series && typeof series === "object") {
-          const bars: DailyBar[] = Object.keys(series).map((d) => ({
-            date: d,
-            close: Number(series[d]["5. adjusted close"] ?? series[d]["4. close"]),
-          }));
-          bars.sort((a, b) => (a.date < b.date ? -1 : 1));
-          if (bars.length < lookbackDays) {
-            // Try "full" once to extend history
-            const url2 = new URL("https://www.alphavantage.co/query");
-            url2.searchParams.set("function", "TIME_SERIES_DAILY");
-            url2.searchParams.set("symbol", symbol);
-            url2.searchParams.set("outputsize", "full");
-            url2.searchParams.set("apikey", AV_KEY);
-            const res2 = await fetch(url2.toString(), { cache: "no-store" });
-            if (res2.ok) {
-              const json2 = await res2.json();
-              const series2 = json2?.["Time Series (Daily)"];
-              if (series2) {
-                const all: DailyBar[] = Object.keys(series2).map((d) => ({
-                  date: d,
-                  close: Number(series2[d]["4. close"]),
-                }));
-                all.sort((a, b) => (a.date < b.date ? -1 : 1));
-                return lastN(all, lookbackDays);
-              }
-            }
-          }
-          return lastN(bars, lookbackDays);
-        }
-
-        throw new Error("AV unexpected payload");
-      } catch (e) {
-        console.warn(`[prices] AV failed for ${symbol}:`, (e as Error).message);
-        // Continue to other sources after attempts
-      }
-    }
-  }
-
-  // 2) Stooq CSV (use `.us` suffix for US listings)
+  // Stooq CSV (US listings use `.us` suffix)
   try {
     const stooqSym = `${symbol.toLowerCase()}.us`;
     const stooq = `https://stooq.com/q/d/l/?s=${encodeURIComponent(stooqSym)}&i=d`;
@@ -403,12 +297,12 @@ async function fetchSeriesForSymbol(symbol: string, lookbackDays: number): Promi
         .filter((b) => isFinite(b.close));
       bars.sort((a, b) => (a.date < b.date ? -1 : 1));
       if (bars.length) return lastN(bars, lookbackDays);
+    } else {
+      console.warn(`[prices] Stooq returned no rows for ${symbol}.us`);
     }
   } catch (e) {
     console.warn(`[prices] Stooq failed for ${symbol}:`, (e as Error).message);
   }
-
-  // 3) Give up for this symbol
   return [];
 }
 
@@ -453,7 +347,6 @@ const emptyRow = (asof: string, s: SymbolRow) => ({
 });
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const lastN = <T,>(arr: T[], n: number) => arr.slice(Math.max(0, arr.length - n));
 const stddev = (xs: number[]) => {
   const m = xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -485,6 +378,13 @@ const toPgNullable = (x: number | null) => (isFinite(x as number) ? x : null);
    Convenience orchestrator (optional)
    ──────────────────────────────────────────────────────────── */
 
+/**
+ * Full pipeline helper you can call from the cron:
+ *   1) load active symbols
+ *   2) fetch prices
+ *   3) compute metrics & write
+ *   4) fetch fear/greed & store
+ */
 export async function runDailyMetricsPipeline() {
   const symbols: SymbolRow[] =
     (await query<SymbolRow>(`SELECT symbol, provider, asset_class, is_active FROM symbols WHERE is_active = true`))
