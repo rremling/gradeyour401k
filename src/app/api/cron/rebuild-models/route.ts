@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    // 1) Refresh metrics + Fear/Greed first
+    // 1) Refresh metrics + Fear/Greed
     const metrics = await runDailyMetricsPipeline();
     const asof = metrics.asof;
 
@@ -31,7 +31,7 @@ export async function GET() {
           });
         }
 
-        // Header row
+        // Insert snapshot header
         await query(
           `INSERT INTO model_snapshots (snapshot_id, asof_date, provider, profile, is_approved, notes)
            VALUES ($1, $2, $3, $4, true, $5)
@@ -39,7 +39,7 @@ export async function GET() {
           [snapshot.id, asof, provider, profile, snapshot.notes || null]
         );
 
-        // Lines (ranked holdings). Use a simple loop—reliable across drivers.
+        // Insert snapshot lines (loop; simple & reliable)
         if (snapshot.lines && snapshot.lines.length) {
           for (let i = 0; i < snapshot.lines.length; i++) {
             const ln = snapshot.lines[i];
