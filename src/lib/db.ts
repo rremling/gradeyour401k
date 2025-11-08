@@ -1,23 +1,18 @@
 // src/lib/db.ts
-import { Pool } from "pg";
+import { Pool } from "@neondatabase/serverless";
+import type { QueryResult, QueryResultRow } from "pg";
 
-const connectionString = process.env.DATABASE_URL!;
-export const pool = new Pool({
-  connectionString,
-  ssl: { rejectUnauthorized: false }, // Neon requires SSL
-});
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-export async function sql<T = any>(text: string, params: any[] = []) {
+export async function query<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: any[]
+): Promise<QueryResult<T>> {
   const client = await pool.connect();
   try {
-    const res = await client.query<T>(text, params);
-    return res;
+    return await client.query<T>(text, params);
   } finally {
     client.release();
   }
 }
 
-// Optional alias if some routes import { query }
-export async function query<T = any>(text: string, params: any[] = []) {
-  return sql<T>(text, params);
-}
