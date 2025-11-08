@@ -19,6 +19,17 @@ export async function GET() {
     for (const provider of providers) {
       for (const profile of profiles) {
         const snapshot = await buildProviderProfileModel({ asof, provider, profile });
+       // TEMP: debug one model build
+    if (provider === "Fidelity" && profile === "Balanced") {
+      console.log("[rebuild-models] DRAFT", {
+        asof,
+        provider,
+        profile,
+        count: snapshot.lines?.length ?? 0,
+        lines: snapshot.lines, // or snapshot.lines.slice(0,5) if you want shorter logs
+      });
+    }
+
         await query(
           `INSERT INTO model_snapshots(snapshot_id, asof_date, provider, profile, is_approved, notes)
            VALUES ($1,$2,$3,$4,true,$5)
