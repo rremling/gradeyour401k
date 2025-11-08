@@ -245,8 +245,10 @@ export async function computeAndStoreMetrics(
 }
 
 /**
- * Fetch Fear/Greed reading and persist. If FEAR_GREED_FEED_URL is unset or fails,
- * we return null and do NOT throw (cron continues).
+ * Fetch Fear/Greed reading and persist.
+ * Accepts:
+ *   1) { value: number }
+ *   2) Alternative.me: { data: [{ value: "73", timestamp: "1730918400", ... }], ... }
  */
 export async function fetchFearGreed(): Promise<{ reading: number; source: string } | null> {
   if (!FEAR_GREED_URL) {
@@ -257,18 +259,35 @@ export async function fetchFearGreed(): Promise<{ reading: number; source: strin
     const res = await fetch(FEAR_GREED_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    const reading = Number(json?.value);
-    if (!isFinite(reading)) throw new Error("Invalid value");
-    const asof = todayUTC();
+
+    let value: number | null = null;
+    let srcDateIso: string | null = null;
+
+    if (typeof json?.value !== "undefined") {
+      value = Number(json.value);
+    } else if (Array.isArray(json?.data) && json.data.length > 0) {
+      const first = json.data[0];
+      value = Number(first?.value);
+      const ts = Number(first?.timestamp);
+      if (Number.isFinite(ts)) {
+        srcDateIso = new Date(ts * 1000).toISOString().slice(0, 10);
+      }
+    }
+
+    if (!Number.isFinite(value)) throw new Error("Invalid value");
+
+    const asof = srcDateIso || todayUTC();
+    const reading = Math.max(0, Math.min(100, Math.round(value as number)));
 
     await query(
       `INSERT INTO fear_greed_cache(asof_date, reading, source)
-         VALUES ($1,$2,$3)
+       VALUES ($1,$2,$3)
        ON CONFLICT (asof_date) DO UPDATE
          SET reading = EXCLUDED.reading, source = EXCLUDED.source`,
-      [asof, Math.round(reading), FEAR_GREED_URL]
+      [asof, reading, FEAR_GREED_URL]
     );
-    return { reading: Math.round(reading), source: FEAR_GREED_URL };
+    console.log(`[fear_greed] cached ${reading} for ${asof}`);
+    return { reading, source: FEAR_GREED_URL };
   } catch (e) {
     console.warn("[fear_greed] fetch failed:", (e as Error).message);
     return null;
