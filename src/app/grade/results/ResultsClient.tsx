@@ -1,4 +1,3 @@
-// src/app/grade/results/ResultsClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -16,6 +15,16 @@ type Preview = {
   grade_adjusted?: number | null;
 };
 
+type ModelLine = { symbol: string; weight: number; role: string | null };
+type ModelResponse = {
+  ok: boolean;
+  asof?: string;
+  provider?: string;
+  profile?: string;
+  fear_greed?: { asof_date: string; reading: number } | null;
+  lines?: ModelLine[];
+};
+
 // ---- Stepper (mobile-friendly) ----
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
@@ -27,7 +36,6 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
 
   return (
     <div className="w-full mb-6">
-      {/* Compact on mobile */}
       <ol className="flex sm:hidden items-end justify-between gap-2">
         {steps.map((s) => {
           const isActive = s.n === current;
@@ -59,8 +67,8 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
         })}
       </ol>
     </div>
-  ); // <-- ADDED
-}       // <-- ADDED
+  );
+}
 
 export default function ResultsClient() {
   const sp = useSearchParams();
@@ -74,6 +82,9 @@ export default function ResultsClient() {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [model, setModel] = useState<ModelResponse | null>(null);
+
+  // ---- Fetch user preview ----
   useEffect(() => {
     let active = true;
     async function load() {
@@ -105,6 +116,25 @@ export default function ResultsClient() {
     };
   }, [previewId]);
 
+  // ---- Fetch recommended model + fear/greed ----
+  useEffect(() => {
+    async function loadModel() {
+      if (!providerParam || !profileParam) return;
+      try {
+        const q = new URLSearchParams({
+          provider: providerParam,
+          profile: profileParam,
+        }).toString();
+        const res = await fetch(`/api/models/latest?${q}`, { cache: "no-store" });
+        const json = (await res.json()) as ModelResponse;
+        if (json?.ok) setModel(json);
+      } catch (e) {
+        console.warn("model fetch failed:", e);
+      }
+    }
+    loadModel();
+  }, [providerParam, profileParam]);
+
   const providerDisplay = useMemo(() => {
     return preview?.provider_display || providerParam || preview?.provider || "—";
   }, [preview, providerParam]);
@@ -123,26 +153,31 @@ export default function ResultsClient() {
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
-      {/* Progression / flow */}
       <Stepper current={2} />
-
       <h1 className="text-2xl font-bold">Your Grade</h1>
 
       <div className="rounded-lg border p-6 space-y-3 bg-white">
         <p>
-          <span className="font-medium">Provider:</span>{" "}
-          {providerDisplay}
+          <span className="font-medium">Provider:</span> {providerDisplay}
         </p>
         <p>
           <span className="font-medium">Profile:</span>{" "}
           {profileParam || preview?.profile || "—"}
         </p>
         <p className="text-3xl">⭐ {gradeParam} / 5</p>
+        {model?.fear_greed && (
+          <p className="text-sm text-gray-700">
+            Market Sentiment (Fear/Greed):{" "}
+            <span className="font-semibold">{model.fear_greed.reading}</span>
+          </p>
+        )}
         <p className="text-sm text-gray-600">
-          This is a preview grade. The full PDF report (with model comparison and market overlay) is sent after purchase.
+          This is a preview grade. The full PDF report (with model comparison and
+          market overlay) is sent after purchase.
         </p>
       </div>
 
+      {/* User holdings */}
       {loading && (
         <div className="rounded-lg border p-4 bg-white text-sm text-gray-600">
           Loading your holdings…
@@ -173,7 +208,35 @@ export default function ResultsClient() {
         </section>
       )}
 
-      {/* Reasons to buy + primary CTA */}
+      {/* Recommended model overlay */}
+      {model?.lines && model.lines.length > 0 && (
+        <section className="rounded-lg border p-6 bg-white">
+          <h2 className="text-lg font-semibold mb-3">
+            Recommended {model.provider} / {model.profile} Model
+          </h2>
+          <div className="grid grid-cols-12 text-sm font-medium border-b pb-2">
+            <div className="col-span-7">Symbol</div>
+            <div className="col-span-3 text-right">Weight %</div>
+            <div className="col-span-2 text-right">Role</div>
+          </div>
+          <div className="divide-y">
+            {model.lines.map((r, i) => (
+              <div key={`${r.symbol}-${i}`} className="grid grid-cols-12 py-2 text-sm">
+                <div className="col-span-7">{r.symbol}</div>
+                <div className="col-span-3 text-right">{(r.weight * 100).toFixed(1)}</div>
+                <div className="col-span-2 text-right text-gray-600">{r.role}</div>
+              </div>
+            ))}
+          </div>
+          {model.asof && (
+            <p className="text-xs text-gray-500 mt-2">
+              Model as of {model.asof.slice(0, 10)}
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* Reasons to buy + CTA */}
       <section className="rounded-lg border p-6 bg-white space-y-4">
         <h2 className="text-lg font-semibold">Why buy the full report?</h2>
         <ul className="list-disc list-inside text-sm text-gray-700 space-y-1">
