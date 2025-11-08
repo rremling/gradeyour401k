@@ -205,7 +205,7 @@ export async function GET(req: NextRequest) {
         if (!row || !row.email) throw new Error("missing email");
 
         const provider = (row.provider ?? "").trim();
-        const profile = (row.profile ?? "Moderate").trim();
+        const profile = (row.profile ?? "Balanced").trim();
 
         // You can compute a real grade/holdings if available; for now we use null/empty to match your template's safe fallbacks
         const grade: number | null = null;
@@ -248,6 +248,12 @@ export async function GET(req: NextRequest) {
         failures.push({ id: row?.id ?? -1, error: String(e?.message || e) });
       }
     }
+
+    // Log success run in cron_log (even for dry runs so you can see activity)
+    await query(
+      `INSERT INTO cron_log (job_name, ran_at) VALUES ($1, NOW())`,
+      ["report-cron"]
+    );
 
     console.log("[cron] done", { processed, failures: failures.length, dryRun });
     return NextResponse.json({ ok: true, processed, failures, dryRun });
