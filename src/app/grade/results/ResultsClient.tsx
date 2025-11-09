@@ -11,7 +11,7 @@ type Preview = {
   provider?: string | null;
   provider_display?: string | null;
   profile?: string | null;
-  rows?: PreviewRow[] | unknown; // may arrive as non-array; we coerce below
+  rows?: PreviewRow[] | unknown;
   grade_base?: number | null;
   grade_adjusted?: number | null;
 };
@@ -23,7 +23,7 @@ type ModelResponse = {
   provider?: string;
   profile?: string;
   fear_greed?: { asof_date: string; reading: number } | null;
-  lines?: ModelLine[];
+  lines?: ModelLine[] | unknown; // can be anything; we coerce below
 };
 
 // ---- Stepper (mobile-friendly) ----
@@ -140,7 +140,7 @@ export default function ResultsClient() {
     return preview?.provider_display || providerParam || preview?.provider || "—";
   }, [preview, providerParam]);
 
-  // ✅ Clean holdings: coerce to array before using array methods
+  // ✅ Safely coerce preview rows to a real array
   const rows = useMemo(() => {
     const raw = Array.isArray(preview?.rows) ? (preview!.rows as PreviewRow[]) : [];
     return raw
@@ -151,6 +151,12 @@ export default function ResultsClient() {
       }))
       .filter((r) => Number.isFinite(r.weight));
   }, [preview]);
+
+  // ✅ Safely coerce model lines to a real array
+  const modelLines = useMemo<ModelLine[]>(() => {
+    const candidate = model?.lines as unknown;
+    return Array.isArray(candidate) ? (candidate as ModelLine[]) : [];
+  }, [model]);
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
@@ -210,10 +216,10 @@ export default function ResultsClient() {
       )}
 
       {/* Recommended model overlay */}
-      {model?.lines && model.lines.length > 0 && (
+      {modelLines.length > 0 && (
         <section className="rounded-lg border p-6 bg-white">
           <h2 className="text-lg font-semibold mb-3">
-            Recommended {model.provider} / {model.profile} Model
+            Recommended {model?.provider} / {model?.profile} Model
           </h2>
           <div className="grid grid-cols-12 text-sm font-medium border-b pb-2">
             <div className="col-span-7">Symbol</div>
@@ -221,7 +227,7 @@ export default function ResultsClient() {
             <div className="col-span-2 text-right">Role</div>
           </div>
           <div className="divide-y">
-            {model.lines.map((r, i) => (
+            {modelLines.map((r, i) => (
               <div key={`${r.symbol}-${i}`} className="grid grid-cols-12 py-2 text-sm">
                 <div className="col-span-7">{r.symbol}</div>
                 <div className="col-span-3 text-right">{(r.weight * 100).toFixed(1)}</div>
@@ -229,7 +235,7 @@ export default function ResultsClient() {
               </div>
             ))}
           </div>
-          {model.asof && (
+          {model?.asof && (
             <p className="text-xs text-gray-500 mt-2">
               Model as of {model.asof.slice(0, 10)}
             </p>
