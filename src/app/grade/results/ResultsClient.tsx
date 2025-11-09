@@ -1,3 +1,4 @@
+// src/app/grade/results/ResultsClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -70,6 +71,26 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
+/* ---------- minimal under-the-hood normalizers ---------- */
+function coerceArray<T = any>(v: unknown): T[] {
+  if (Array.isArray(v)) return v as T[];
+  if (v == null) return [];
+  if (typeof v === "string") {
+    try {
+      const parsed = JSON.parse(v);
+      return Array.isArray(parsed) ? (parsed as T[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  if (typeof v === "object") {
+    const obj = v as Record<string, any>;
+    const keys = Object.keys(obj).filter((k) => String(+k) === k).sort((a, b) => +a - +b);
+    if (keys.length) return keys.map((k) => obj[k]) as T[];
+  }
+  return [];
+}
+
 export default function ResultsClient() {
   const sp = useSearchParams();
 
@@ -94,13 +115,15 @@ export default function ResultsClient() {
         const res = await fetch(`/api/preview/get?id=${encodeURIComponent(previewId)}`, {
           cache: "no-store",
         });
-        const data = (await res.json()) as Preview;
+        const data = (await res.json()) as Preview & { rows?: unknown };
         if (!active) return;
         if (!res.ok || !data?.ok) {
           setError("Could not load your saved preview.");
           setPreview(null);
         } else {
-          setPreview(data);
+          // minimal change: force rows to array to avoid `.forEach` errors
+          const normalizedRows = coerceArray<PreviewRow>(data.rows);
+          setPreview({ ...data, rows: normalizedRows });
           setError(null);
         }
       } catch (e: any) {
@@ -126,8 +149,12 @@ export default function ResultsClient() {
           profile: profileParam,
         }).toString();
         const res = await fetch(`/api/models/latest?${q}`, { cache: "no-store" });
-        const json = (await res.json()) as ModelResponse;
-        if (json?.ok) setModel(json);
+        const json = (await res.json()) as ModelResponse & { lines?: unknown };
+        if (json?.ok) {
+          // minimal change: guard lines too
+          const safeLines = coerceArray<ModelLine>(json.lines);
+          setModel({ ...json, lines: safeLines });
+        }
       } catch (e) {
         console.warn("model fetch failed:", e);
       }
