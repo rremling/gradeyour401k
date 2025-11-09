@@ -45,6 +45,7 @@ export const FUND_LABELS: Record<string, string> = {
   FBCG: "Fidelity® Blue Chip Growth ETF",
   FBCV: "Fidelity® Blue Chip Value ETF",
   FDVV: "Fidelity® High Dividend ETF",
+  FTIHX: "Fidelity® Total International Index",
 
   // Newly added Fidelity tickers:
   FDCPX: "Fidelity® Disruptive Communications Fund",
