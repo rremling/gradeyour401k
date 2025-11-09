@@ -11,7 +11,7 @@ type Preview = {
   provider?: string | null;
   provider_display?: string | null;
   profile?: string | null;
-  rows?: PreviewRow[];
+  rows?: PreviewRow[] | unknown; // may arrive as non-array; we coerce below
   grade_base?: number | null;
   grade_adjusted?: number | null;
 };
@@ -71,26 +71,6 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-/* ---------- minimal under-the-hood normalizers ---------- */
-function coerceArray<T = any>(v: unknown): T[] {
-  if (Array.isArray(v)) return v as T[];
-  if (v == null) return [];
-  if (typeof v === "string") {
-    try {
-      const parsed = JSON.parse(v);
-      return Array.isArray(parsed) ? (parsed as T[]) : [];
-    } catch {
-      return [];
-    }
-  }
-  if (typeof v === "object") {
-    const obj = v as Record<string, any>;
-    const keys = Object.keys(obj).filter((k) => String(+k) === k).sort((a, b) => +a - +b);
-    if (keys.length) return keys.map((k) => obj[k]) as T[];
-  }
-  return [];
-}
-
 export default function ResultsClient() {
   const sp = useSearchParams();
 
@@ -115,15 +95,13 @@ export default function ResultsClient() {
         const res = await fetch(`/api/preview/get?id=${encodeURIComponent(previewId)}`, {
           cache: "no-store",
         });
-        const data = (await res.json()) as Preview & { rows?: unknown };
+        const data = (await res.json()) as Preview;
         if (!active) return;
         if (!res.ok || !data?.ok) {
           setError("Could not load your saved preview.");
           setPreview(null);
         } else {
-          // minimal change: force rows to array to avoid `.forEach` errors
-          const normalizedRows = coerceArray<PreviewRow>(data.rows);
-          setPreview({ ...data, rows: normalizedRows });
+          setPreview(data);
           setError(null);
         }
       } catch (e: any) {
@@ -149,12 +127,8 @@ export default function ResultsClient() {
           profile: profileParam,
         }).toString();
         const res = await fetch(`/api/models/latest?${q}`, { cache: "no-store" });
-        const json = (await res.json()) as ModelResponse & { lines?: unknown };
-        if (json?.ok) {
-          // minimal change: guard lines too
-          const safeLines = coerceArray<ModelLine>(json.lines);
-          setModel({ ...json, lines: safeLines });
-        }
+        const json = (await res.json()) as ModelResponse;
+        if (json?.ok) setModel(json);
       } catch (e) {
         console.warn("model fetch failed:", e);
       }
@@ -166,13 +140,13 @@ export default function ResultsClient() {
     return preview?.provider_display || providerParam || preview?.provider || "—";
   }, [preview, providerParam]);
 
-  // Clean holdings: drop meta/invalid rows and coerce weights safely
+  // ✅ Clean holdings: coerce to array before using array methods
   const rows = useMemo(() => {
-    const raw = preview?.rows || [];
+    const raw = Array.isArray(preview?.rows) ? (preview!.rows as PreviewRow[]) : [];
     return raw
       .filter((r) => r && typeof r.symbol === "string" && r.symbol.trim() !== "")
       .map((r) => ({
-        symbol: (r.symbol as string).toUpperCase(),
+        symbol: String(r.symbol).toUpperCase(),
         weight: Number(r.weight ?? 0),
       }))
       .filter((r) => Number.isFinite(r.weight));
