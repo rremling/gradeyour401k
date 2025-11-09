@@ -1,3 +1,4 @@
+// src/app/grade/results/ResultsClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -10,7 +11,7 @@ type Preview = {
   provider?: string | null;
   provider_display?: string | null;
   profile?: string | null;
-  rows?: PreviewRow[];
+  rows?: PreviewRow[];               // we’ll coerce to array
   grade_base?: number | null;
   grade_adjusted?: number | null;
 };
@@ -22,7 +23,7 @@ type ModelResponse = {
   provider?: string;
   profile?: string;
   fear_greed?: { asof_date: string; reading: number } | null;
-  lines?: ModelLine[];
+  lines?: ModelLine[];               // we’ll coerce to array
 };
 
 // ---- Stepper (mobile-friendly) ----
@@ -70,6 +71,32 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
+// tiny helpers to coerce data safely
+function toArray<T>(v: unknown): T[] {
+  return Array.isArray(v) ? (v as T[]) : [];
+}
+function cleanRows(raw: unknown): { symbol: string; weight: number }[] {
+  const arr = toArray<PreviewRow>(raw);
+  return arr
+    .filter((r) => r && typeof r.symbol === "string" && r.symbol.trim() !== "")
+    .map((r) => ({
+      symbol: String(r.symbol).toUpperCase().trim(),
+      weight: Number((r.weight as any) ?? 0),
+    }))
+    .filter((r) => Number.isFinite(r.weight));
+}
+function cleanLines(raw: unknown): ModelLine[] {
+  const arr = toArray<ModelLine>(raw);
+  return arr
+    .filter((r) => r && typeof r.symbol === "string")
+    .map((r) => ({
+      symbol: String(r.symbol).toUpperCase().trim(),
+      weight: Number(r.weight ?? 0),
+      role: r.role ?? null,
+    }))
+    .filter((r) => Number.isFinite(r.weight));
+}
+
 export default function ResultsClient() {
   const sp = useSearchParams();
 
@@ -94,18 +121,31 @@ export default function ResultsClient() {
         const res = await fetch(`/api/preview/get?id=${encodeURIComponent(previewId)}`, {
           cache: "no-store",
         });
-        const data = (await res.json()) as Preview;
+        const raw = await res.json();
         if (!active) return;
-        if (!res.ok || !data?.ok) {
-          setError("Could not load your saved preview.");
+
+        if (!res.ok || !raw?.ok) {
+          setError(raw?.error || "Could not load your saved preview.");
           setPreview(null);
-        } else {
-          setPreview(data);
-          setError(null);
+          return;
         }
+
+        // force a plain JSON object and coerce rows to array
+        const safe: Preview = {
+          ok: true,
+          provider: raw.provider ?? null,
+          provider_display: raw.provider_display ?? null,
+          profile: raw.profile ?? null,
+          rows: cleanRows(raw.rows),
+          grade_base: raw.grade_base ?? null,
+          grade_adjusted: raw.grade_adjusted ?? null,
+        };
+        setPreview(safe);
+        setError(null);
       } catch (e: any) {
         if (!active) return;
         setError(e?.message || "Failed to fetch preview.");
+        setPreview(null);
       } finally {
         if (active) setLoading(false);
       }
@@ -118,6 +158,7 @@ export default function ResultsClient() {
 
   // ---- Fetch recommended model + fear/greed ----
   useEffect(() => {
+    let active = true;
     async function loadModel() {
       if (!providerParam || !profileParam) return;
       try {
@@ -126,30 +167,39 @@ export default function ResultsClient() {
           profile: profileParam,
         }).toString();
         const res = await fetch(`/api/models/latest?${q}`, { cache: "no-store" });
-        const json = (await res.json()) as ModelResponse;
-        if (json?.ok) setModel(json);
-      } catch (e) {
-        console.warn("model fetch failed:", e);
+        const raw = await res.json();
+        if (!active) return;
+
+        if (res.ok && raw?.ok) {
+          const safe: ModelResponse = {
+            ok: true,
+            asof: typeof raw.asof === "string" ? raw.asof : undefined,
+            provider: raw.provider,
+            profile: raw.profile,
+            fear_greed: raw.fear_greed ?? null,
+            lines: cleanLines(raw.lines),
+          };
+          setModel(safe);
+        } else {
+          setModel(null);
+        }
+      } catch {
+        if (!active) return;
+        setModel(null);
       }
     }
     loadModel();
+    return () => {
+      active = false;
+    };
   }, [providerParam, profileParam]);
 
   const providerDisplay = useMemo(() => {
     return preview?.provider_display || providerParam || preview?.provider || "—";
   }, [preview, providerParam]);
 
-  // Clean holdings: drop meta/invalid rows and coerce weights safely
-  const rows = useMemo(() => {
-    const raw = preview?.rows || [];
-    return raw
-      .filter((r) => r && typeof r.symbol === "string" && r.symbol.trim() !== "")
-      .map((r) => ({
-        symbol: (r.symbol as string).toUpperCase(),
-        weight: Number(r.weight ?? 0),
-      }))
-      .filter((r) => Number.isFinite(r.weight));
-  }, [preview]);
+  // Use the already-cleaned array from preview
+  const rows = preview?.rows ?? [];
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-6">
