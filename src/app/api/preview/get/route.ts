@@ -5,14 +5,15 @@ import { query } from "@/lib/db";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type PreviewRow = {
+type DbRow = {
   id: string;
   provider: string | null;
   provider_display: string | null;
   profile: string | null;
-  rows: unknown; // JSONB or text
+  rows_text: string | null;      // <-- text, never raw JSONB
   grade_base: number | null;
   grade_adjusted: number | null;
+  created_at?: string | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -22,51 +23,46 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await query<PreviewRow>(
+    // Force JSONB -> TEXT so we control parsing and return a plain JS array
+    const rows = await query<DbRow>(
       `
       SELECT
-        id::text AS id,
+        id::text         AS id,
         provider,
         provider_display,
         profile,
-        "rows",
+        ("rows")::text   AS rows_text,
         grade_base,
-        grade_adjusted
+        grade_adjusted,
+        created_at
       FROM public.previews
       WHERE id::text = $1
       LIMIT 1
       `,
-      [id] // ← bind $1 properly
+      [id]
     );
 
-    const r = result.rows?.[0];
-    if (!r) {
+    if (!rows || rows.length === 0) {
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
 
-    // Safely normalize "rows" → array of { symbol, weight }
-    let parsedRows: Array<{ symbol: string; weight: number }> = [];
+    const r = rows[0];
+
+    // Parse safely into a *real array* of {symbol, weight}
+    let parsed: Array<{ symbol: string; weight: number }> = [];
     try {
-      let raw: unknown = r.rows;
-
-      // If the column came back as a JSON string, parse it.
-      if (typeof raw === "string") {
-        raw = JSON.parse(raw);
-      }
-
+      const raw = r.rows_text ? JSON.parse(r.rows_text) : null;
       if (Array.isArray(raw)) {
-        parsedRows = raw
-          .filter((it) => it && typeof it === "object")
-          .map((it: any) => ({
-            symbol: String(it?.symbol || "").toUpperCase(),
-            weight: Number(it?.weight ?? 0),
+        parsed = raw
+          .filter((x: any) => x && typeof x.symbol === "string")
+          .map((x: any) => ({
+            symbol: String(x.symbol).toUpperCase().trim(),
+            weight: Number(x.weight ?? 0),
           }))
-          .filter((it) => it.symbol && Number.isFinite(it.weight));
-      } else {
-        parsedRows = [];
+          .filter((x) => Number.isFinite(x.weight));
       }
     } catch {
-      parsedRows = [];
+      parsed = [];
     }
 
     return NextResponse.json(
@@ -76,7 +72,7 @@ export async function GET(req: NextRequest) {
         provider: r.provider || null,
         provider_display: r.provider_display || null,
         profile: r.profile || null,
-        rows: parsedRows,
+        rows: parsed, // <-- guaranteed array
         grade_base: r.grade_base ?? null,
         grade_adjusted: r.grade_adjusted ?? null,
       },
