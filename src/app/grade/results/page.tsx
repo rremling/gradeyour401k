@@ -1,6 +1,6 @@
 // src/app/grade/results/page.tsx
 import Link from "next/link";
-import { sql } from "@/lib/db"; // uses the helper you added in lib/db.ts
+import { sql } from "@/lib/db";
 import { FUND_LABELS, labelFor } from "@/lib/funds";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,6 @@ export const dynamic = "force-dynamic";
 type SearchParams = { previewId?: string };
 type Holding = { symbol: string; weight: number };
 
-// ───────────────────────── Stepper (mobile-friendly) ─────────────────────────
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -19,7 +18,6 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
 
   return (
     <div className="w-full mb-6">
-      {/* Compact on mobile */}
       <ol className="flex sm:hidden items-end justify-between gap-2">
         {steps.map((s) => {
           const isActive = s.n === current;
@@ -51,7 +49,6 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
         })}
       </ol>
 
-      {/* Full labels with horizontal scroll on larger screens */}
       <div className="hidden sm:block">
         <div className="-mx-3 overflow-x-auto overscroll-x-contain">
           <ol className="flex items-center gap-3 flex-nowrap px-3">
@@ -98,27 +95,14 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-/** Compute a simple preliminary grade from holdings + profile. */
 function computePrelimGrade(profile: string, rows: Holding[]): number {
   const weights = rows.map((r) => (Number.isFinite(r.weight) ? r.weight : 0));
   const total = weights.reduce((s, n) => s + n, 0);
-
   let base = profile === "Aggressive Growth" ? 4.5 : profile === "Balanced" ? 3.8 : 4.1;
-
-  // Penalize if not around 100%
   const off = Math.abs(100 - total);
-  if (off > 0.25) {
-    const p = Math.min(1, off / 100); // max -1.0
-    base -= p;
-  }
-
-  // Penalize high concentration
-  const maxWt = Math.max(0, ...weights);
-  if (maxWt > 60) base -= 0.2;
-
-  // Clamp and half-star round
-  const score = Math.max(1, Math.min(5, Math.round(base * 2) / 2));
-  return score;
+  if (off > 0.25) base -= Math.min(1, off / 100);
+  if (Math.max(0, ...weights) > 60) base -= 0.2;
+  return Math.max(1, Math.min(5, Math.round(base * 2) / 2));
 }
 
 function Stars({ value }: { value: number }) {
@@ -155,16 +139,25 @@ export default async function ResultPage({ searchParams }: { searchParams: Searc
     );
   }
 
-  // Supports UUID or bigint ids by casting to text
+  // 1) Force driver to hand us plain scalars we control
   const r = await sql(
     `
-    SELECT id, created_at, provider, provider_display, profile, "rows", grade_base, grade_adjusted
+    SELECT
+      id::text                         AS id,
+      to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at_iso,
+      provider,
+      provider_display,
+      profile,
+      ("rows")::text                   AS rows_json,
+      CAST(grade_base AS float8)       AS grade_base_num,
+      CAST(grade_adjusted AS float8)   AS grade_adjusted_num
     FROM public.previews
     WHERE id::text = $1
     LIMIT 1
     `,
     [previewId]
   );
+
   const p: any = r.rows?.[0];
 
   if (!p) {
@@ -189,29 +182,29 @@ export default async function ResultPage({ searchParams }: { searchParams: Searc
   const providerDisplay: string = p.provider_display || p.provider || "—";
   const profile: string = p.profile || "—";
 
-  // Parse holdings safely (rows may be json or text)
+  // 2) Parse holdings defensively from TEXT
   let holdings: Holding[] = [];
   try {
-    const raw = p.rows;
-    const arr = Array.isArray(raw) ? raw : JSON.parse(raw);
-    holdings = (arr as any[])
-      .map((r) => ({
-        symbol: String(r.symbol || "").toUpperCase(),
-        weight: Number(r.weight || 0),
-      }))
-      .filter((r) => r.symbol && Number.isFinite(r.weight));
+    const rawText: string = typeof p.rows_json === "string" ? p.rows_json : "[]";
+    const arr = JSON.parse(rawText);
+    if (Array.isArray(arr)) {
+      holdings = arr
+        .map((r: any) => ({
+          symbol: String(r?.symbol || "").toUpperCase().trim(),
+          weight: Number(r?.weight ?? 0),
+        }))
+        .filter((r) => r.symbol && Number.isFinite(r.weight));
+    }
   } catch {
     holdings = [];
   }
 
+  // 3) Pure numbers only
+  const gb = Number.isFinite(p.grade_base_num) ? Number(p.grade_base_num) : null;
+  const ga = Number.isFinite(p.grade_adjusted_num) ? Number(p.grade_adjusted_num) : null;
+
   const numericGrade: number | null =
-    typeof p.grade_adjusted === "number"
-      ? p.grade_adjusted
-      : typeof p.grade_base === "number"
-      ? p.grade_base
-      : holdings.length > 0
-      ? computePrelimGrade(profile, holdings)
-      : null;
+    ga ?? gb ?? (holdings.length > 0 ? computePrelimGrade(profile, holdings) : null);
 
   const grade = numericGrade !== null ? numericGrade.toFixed(1) : "—";
   const gradeNum = numericGrade ?? 0;
@@ -221,7 +214,6 @@ export default async function ResultPage({ searchParams }: { searchParams: Searc
     <main className="mx-auto max-w-3xl p-6 space-y-8">
       <Stepper current={2} />
 
-      {/* Hero header with subtle gradient */}
       <header className="rounded-xl p-6 bg-gradient-to-br from-blue-600/10 to-emerald-500/10 border">
         <h1 className="text-2xl font-bold">Your 401(k) Grade</h1>
         <p className="text-gray-700 mt-1">
@@ -230,7 +222,6 @@ export default async function ResultPage({ searchParams }: { searchParams: Searc
         </p>
       </header>
 
-      {/* Grade card */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -245,7 +236,6 @@ export default async function ResultPage({ searchParams }: { searchParams: Searc
             </p>
           </div>
           <div className="text-right hidden sm:block">
-            {/* Total weight meter */}
             <div className="text-xs text-gray-600 mb-1">Total allocation</div>
             <div className="w-44 h-2 rounded-full bg-gray-200 overflow-hidden">
               <div
@@ -258,7 +248,6 @@ export default async function ResultPage({ searchParams }: { searchParams: Searc
         </div>
       </section>
 
-      {/* Holdings list with descriptions */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Your current holdings</h2>
@@ -292,7 +281,6 @@ export default async function ResultPage({ searchParams }: { searchParams: Searc
         <div className="mt-2 text-xs text-gray-500">Total: {total.toFixed(1)}%</div>
       </section>
 
-      {/* Value prop + CTA */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
         <h2 className="font-semibold">Make it 5-Stars with an Optimized Report</h2>
         <p className="text-sm text-gray-700 mt-2">
