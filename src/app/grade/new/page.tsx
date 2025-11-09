@@ -18,8 +18,7 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   blackrock: "BlackRock / iShares",
   "state-street": "State Street / SPDR",
   voya: "Voya",
-  other: "Other",
-};
+  };
 
 // ---- Provider ticker catalogs ----
 const PROVIDER_FUNDS: Record<string, string[]> = {
