@@ -10,11 +10,19 @@ type DbRow = {
   provider: string | null;
   provider_display: string | null;
   profile: string | null;
-  rows_text: string | null;      // <-- text, never raw JSONB
+  rows_text: string | null;      // text version of JSONB
   grade_base: number | null;
   grade_adjusted: number | null;
   created_at?: string | null;
 };
+
+// Normalize either QueryResult or array into an array of rows
+function asRows<T = any>(result: any): T[] {
+  if (!result) return [];
+  if (Array.isArray(result)) return result as T[];
+  if (Array.isArray(result.rows)) return result.rows as T[];
+  return [];
+}
 
 export async function GET(req: NextRequest) {
   const id = (req.nextUrl.searchParams.get("id") || "").trim();
@@ -24,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // Force JSONB -> TEXT so we control parsing and return a plain JS array
-    const rows = await query<DbRow>(
+    const result = await query<DbRow>(
       `
       SELECT
         id::text         AS id,
@@ -42,11 +50,12 @@ export async function GET(req: NextRequest) {
       [id]
     );
 
-    if (!rows || rows.length === 0) {
+    const list = asRows<DbRow>(result);
+    if (list.length === 0) {
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
 
-    const r = rows[0];
+    const r = list[0];
 
     // Parse safely into a *real array* of {symbol, weight}
     let parsed: Array<{ symbol: string; weight: number }> = [];
