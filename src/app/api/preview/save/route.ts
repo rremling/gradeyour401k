@@ -1,6 +1,6 @@
 // src/app/api/preview/save/route.ts
 import { NextRequest } from "next/server";
-import { sql } from "../../../../lib/db";
+import { query, sql } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ function j(status: number, data: unknown) {
 
 async function ensureTable() {
   // Qualify schema and quote "rows"
-  await sql(`
+  await query(`
     CREATE SCHEMA IF NOT EXISTS public;
     CREATE TABLE IF NOT EXISTS public.previews (
       id BIGSERIAL PRIMARY KEY,
@@ -99,26 +99,17 @@ export async function POST(req: NextRequest) {
     null;
 
   try {
-    const res = await sql<{ id: string }>(
-      `
+    const rowsJson = JSON.stringify(cleanRows);
+
+    const ins1 = sql`
       INSERT INTO public.previews
         (provider, provider_display, profile, "rows", grade_base, grade_adjusted, ip)
       VALUES
-        ($1, $2, $3, CAST($4 AS jsonb), $5, $6, $7)
+        (${provider}, ${provider_display}, ${profile}, ${rowsJson}::jsonb, ${grade_base ?? null}, ${grade_adjusted ?? null}, ${ip})
       RETURNING id
-    `,
-      [
-        provider,
-        provider_display,
-        profile,
-        JSON.stringify(cleanRows), // pass as string; CAST handles -> jsonb
-        grade_base ?? null,
-        grade_adjusted ?? null,
-        ip,
-      ]
-    );
-
-    const id = res.rows?.[0]?.id;
+    `;
+    const res = await query(ins1.text, ins1.params);
+    const id = res?.rows?.[0]?.id;
     if (!id) {
       console.error("[preview/save] insert returned no id");
       return j(500, { error: "Failed to create preview id" });
@@ -130,25 +121,17 @@ export async function POST(req: NextRequest) {
       console.warn("[preview/save] table missing, creating…");
       try {
         await ensureTable();
-        const res2 = await sql<{ id: string }>(
-          `
+
+        const rowsJson = JSON.stringify(cleanRows);
+        const ins2 = sql`
           INSERT INTO public.previews
             (provider, provider_display, profile, "rows", grade_base, grade_adjusted, ip)
           VALUES
-            ($1, $2, $3, CAST($4 AS jsonb), $5, $6, $7)
+            (${provider}, ${provider_display}, ${profile}, ${rowsJson}::jsonb, ${grade_base ?? null}, ${grade_adjusted ?? null}, ${ip})
           RETURNING id
-        `,
-          [
-            provider,
-            provider_display,
-            profile,
-            JSON.stringify(cleanRows),
-            grade_base ?? null,
-            grade_adjusted ?? null,
-            ip,
-          ]
-        );
-        const id2 = res2.rows?.[0]?.id;
+        `;
+        const res2 = await query(ins2.text, ins2.params);
+        const id2 = res2?.rows?.[0]?.id;
         if (!id2) {
           console.error("[preview/save] insert-after-create returned no id");
           return j(500, {
