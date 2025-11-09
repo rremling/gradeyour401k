@@ -1,10 +1,8 @@
 // src/app/grade/results/page.tsx
-import dynamic from "next/dynamic";
+'use client';
 
-// Import the client UI without SSR so nothing server-side needs to serialize
-const ResultsClient = dynamic(() => import("./ResultsClient"), { ssr: false });
+import ResultsClient from './ResultsClient';
 
 export default function Page() {
-  // Do NOT accept or pass searchParams/params here
   return <ResultsClient />;
 }
