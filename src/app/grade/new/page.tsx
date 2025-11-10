@@ -18,7 +18,7 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   blackrock: "BlackRock / iShares",
   "state-street": "State Street / SPDR",
   voya: "Voya",
-  };
+};
 
 // ---- Provider ticker catalogs ----
 const PROVIDER_FUNDS: Record<string, string[]> = {
@@ -59,13 +59,12 @@ const PROVIDER_FUNDS: Record<string, string[]> = {
     "ISRIX","ISNQX","IISNX","VISPX","VIQIX","VSICX","VSIPX","VSQIX","VSSIX","IAVIX",
     "ISGJX","ICGIX","ISWIX","IAGIX","INGIX","IRGIX","IVRIX",
   ],
-  other: [],
 };
 
 /** ─────────────────────────────────────────────────────────────────
- *  FUND_LABELS: starter set (safe fallbacks if not found).
- *  Add more tickers anytime; unknown tickers show just the symbol.
- *  ───────────────────────────────────────────────────────────────── */
+ * FUND_LABELS: starter set (safe fallbacks if not found).
+ * Add more tickers anytime; unknown tickers show just the symbol.
+ * ───────────────────────────────────────────────────────────────── */
 const FUND_LABELS: Record<string, string> = {
   // Common extras
   FSKAX: "Fidelity® Total Market Index",
@@ -81,188 +80,188 @@ const FUND_LABELS: Record<string, string> = {
   FSAVX: "Fidelity® Select Automotive",
   FPHAX: "Fidelity® Select Pharmaceuticals",
   FEMKX: "Fidelity® Emerging Markets",
-  FCOM:  "Fidelity® MSCI Communication Services ETF",
+  FCOM: "Fidelity® MSCI Communication Services ETF",
   FNARX: "Fidelity® Select Natural Resources",
   FSUTX: "Fidelity® Select Utilities",
   FXAIX: "Fidelity® 500 Index",
-  FDIS:  "Fidelity® MSCI Consumer Discretionary ETF",
+  FDIS: "Fidelity® MSCI Consumer Discretionary ETF",
   FSPCX: "Fidelity® Select Insurance",
-  FIDU:  "Fidelity® MSCI Industrials ETF",
+  FIDU: "Fidelity® MSCI Industrials ETF",
   FSENX: "Fidelity® Select Energy",
-  FMAT:  "Fidelity® MSCI Materials ETF",
-  FSTA:  "Fidelity® MSCI Consumer Staples ETF",
-  FTEC:  "Fidelity® MSCI Information Technology ETF",
-  FUTY:  "Fidelity® MSCI Utilities ETF",
-  FHLC:  "Fidelity® MSCI Health Care ETF",
-  FENY:  "Fidelity® MSCI Energy ETF",
-  FNCL:  "Fidelity® MSCI Financials ETF",
-  FREL:  "Fidelity® MSCI Real Estate ETF",
-  FBND:  "Fidelity® Total Bond ETF",
-  FCOR:  "Fidelity® Corporate Bond ETF",
-  FVAL:  "Fidelity® Value Factor ETF",
-  FQAL:  "Fidelity® Quality Factor ETF",
-  FDMO:  "Fidelity® Momentum Factor ETF",
-  FDRR:  "Fidelity® Dividend for Rising Rates ETF",
-  FDLO:  "Fidelity® Low Volatility Factor ETF",
-  FIDI:  "Fidelity® Intl High Dividend ETF",
-  FIVA:  "Fidelity® Intl Value Factor ETF",
-  FLRG:  "Fidelity® U.S. Multifactor ETF",
-  FBCG:  "Fidelity® Blue Chip Growth ETF",
-  FBCV:  "Fidelity® Blue Chip Value ETF",
-  FDVV:  "Fidelity® High Dividend ETF",
-  FSLG:  "Fidelity® (label TBD)",
+  FMAT: "Fidelity® MSCI Materials ETF",
+  FSTA: "Fidelity® MSCI Consumer Staples ETF",
+  FTEC: "Fidelity® MSCI Information Technology ETF",
+  FUTY: "Fidelity® MSCI Utilities ETF",
+  FHLC: "Fidelity® MSCI Health Care ETF",
+  FENY: "Fidelity® MSCI Energy ETF",
+  FNCL: "Fidelity® MSCI Financials ETF",
+  FREL: "Fidelity® MSCI Real Estate ETF",
+  FBND: "Fidelity® Total Bond ETF",
+  FCOR: "Fidelity® Corporate Bond ETF",
+  FVAL: "Fidelity® Value Factor ETF",
+  FQAL: "Fidelity® Quality Factor ETF",
+  FDMO: "Fidelity® Momentum Factor ETF",
+  FDRR: "Fidelity® Dividend for Rising Rates ETF",
+  FDLO: "Fidelity® Low Volatility Factor ETF",
+  FIDI: "Fidelity® Intl High Dividend ETF",
+  FIVA: "Fidelity® Intl Value Factor ETF",
+  FLRG: "Fidelity® U.S. Multifactor ETF",
+  FBCG: "Fidelity® Blue Chip Growth ETF",
+  FBCV: "Fidelity® Blue Chip Value ETF",
+  FDVV: "Fidelity® High Dividend ETF",
+  FSLG: "Fidelity® (label TBD)",
   FIDSX: "Fidelity® (label TBD)",
   FBANK: "Fidelity® (label TBD)",
   FDLSX: "Fidelity® (label TBD)",
 
   // Vanguard (subset)
-  VOO:   "Vanguard S&P 500 ETF",
+  VOO: "Vanguard S&P 500 ETF",
   VFIAX: "Vanguard 500 Index Fund Admiral",
-  VTI:   "Vanguard Total Stock Market ETF",
+  VTI: "Vanguard Total Stock Market ETF",
   VTSAX: "Vanguard Total Stock Market Index Admiral",
-  VXF:   "Vanguard Extended Market ETF",
-  VXUS:  "Vanguard Total International Stock ETF",
+  VXF: "Vanguard Extended Market ETF",
+  VXUS: "Vanguard Total International Stock ETF",
   VTIAX: "Vanguard Total Intl Stock Index Admiral",
-  VWO:   "Vanguard FTSE Emerging Markets ETF",
-  BND:   "Vanguard Total Bond Market ETF",
+  VWO: "Vanguard FTSE Emerging Markets ETF",
+  BND: "Vanguard Total Bond Market ETF",
   VBTLX: "Vanguard Total Bond Market Index Admiral",
-  VGSH:  "Vanguard Short-Term Treasury ETF",
-  VGIT:  "Vanguard Intermediate-Term Treasury ETF",
-  VTIP:  "Vanguard Short-Term TIPS ETF",
-  VNQ:   "Vanguard Real Estate ETF",
-  VPU:   "Vanguard Utilities ETF",
-  VDE:   "Vanguard Energy ETF",
-  VHT:   "Vanguard Health Care ETF",
-  VGT:   "Vanguard Information Technology ETF",
-  VFH:   "Vanguard Financials ETF",
-  VCR:   "Vanguard Consumer Discretionary ETF",
-  VDC:   "Vanguard Consumer Staples ETF",
-  VIS:   "Vanguard Industrials ETF",
-  VAW:   "Vanguard Materials ETF",
-  VOX:   "Vanguard Communication Services ETF",
-  VTV:   "Vanguard Value ETF",
-  VUG:   "Vanguard Growth ETF",
-  VB:    "Vanguard Small-Cap ETF",
-  VBR:   "Vanguard Small-Cap Value ETF",
-  VO:    "Vanguard Mid-Cap ETF",
-  VOE:   "Vanguard Mid-Cap Value ETF",
-  VOT:   "Vanguard Mid-Cap Growth ETF",
-  VBK:   "Vanguard Small-Cap Growth ETF",
-  VEA:   "Vanguard FTSE Developed Markets ETF",
-  BSV:   "Vanguard Short-Term Bond ETF",
-  BIV:   "Vanguard Intermediate-Term Bond ETF",
-  BLV:   "Vanguard Long-Term Bond ETF",
-  BNDX:  "Vanguard Total Intl Bond ETF",
-  VGLT:  "Vanguard Long-Term Treasury ETF",
-  VNQI:  "Vanguard Global ex-US Real Estate ETF",
-  VIG:   "Vanguard Dividend Appreciation ETF",
-  VYM:   "Vanguard High Dividend Yield ETF",
-  VTEB:  "Vanguard Tax-Exempt Bond ETF",
-  VT:    "Vanguard Total World Stock ETF",
-  VUSB:  "Vanguard Ultra-Short Bond ETF",
-  VIGI:  "Vanguard Intl Dividend Appreciation ETF",
-  VYMI:  "Vanguard Intl High Dividend Yield ETF",
+  VGSH: "Vanguard Short-Term Treasury ETF",
+  VGIT: "Vanguard Intermediate-Term Treasury ETF",
+  VTIP: "Vanguard Short-Term TIPS ETF",
+  VNQ: "Vanguard Real Estate ETF",
+  VPU: "Vanguard Utilities ETF",
+  VDE: "Vanguard Energy ETF",
+  VHT: "Vanguard Health Care ETF",
+  VGT: "Vanguard Information Technology ETF",
+  VFH: "Vanguard Financials ETF",
+  VCR: "Vanguard Consumer Discretionary ETF",
+  VDC: "Vanguard Consumer Staples ETF",
+  VIS: "Vanguard Industrials ETF",
+  VAW: "Vanguard Materials ETF",
+  VOX: "Vanguard Communication Services ETF",
+  VTV: "Vanguard Value ETF",
+  VUG: "Vanguard Growth ETF",
+  VB: "Vanguard Small-Cap ETF",
+  VBR: "Vanguard Small-Cap Value ETF",
+  VO: "Vanguard Mid-Cap ETF",
+  VOE: "Vanguard Mid-Cap Value ETF",
+  VOT: "Vanguard Mid-Cap Growth ETF",
+  VBK: "Vanguard Small-Cap Growth ETF",
+  VEA: "Vanguard FTSE Developed Markets ETF",
+  BSV: "Vanguard Short-Term Bond ETF",
+  BIV: "Vanguard Intermediate-Term Bond ETF",
+  BLV: "Vanguard Long-Term Bond ETF",
+  BNDX: "Vanguard Total Intl Bond ETF",
+  VGLT: "Vanguard Long-Term Treasury ETF",
+  VNQI: "Vanguard Global ex-US Real Estate ETF",
+  VIG: "Vanguard Dividend Appreciation ETF",
+  VYM: "Vanguard High Dividend Yield ETF",
+  VTEB: "Vanguard Tax-Exempt Bond ETF",
+  VT: "Vanguard Total World Stock ETF",
+  VUSB: "Vanguard Ultra-Short Bond ETF",
+  VIGI: "Vanguard Intl Dividend Appreciation ETF",
+  VYMI: "Vanguard Intl High Dividend Yield ETF",
 
   // Schwab (subset)
-  SCHB:  "Schwab U.S. Broad Market ETF",
-  SCHX:  "Schwab U.S. Large-Cap ETF",
-  SCHG:  "Schwab U.S. Large-Cap Growth ETF",
-  SCHV:  "Schwab U.S. Large-Cap Value ETF",
-  SCHA:  "Schwab U.S. Small-Cap ETF",
-  SCHM:  "Schwab U.S. Mid-Cap ETF",
-  SCHF:  "Schwab International Equity ETF",
-  SCHE:  "Schwab Emerging Markets Equity ETF",
-  SCHC:  "Schwab International Small-Cap Equity ETF",
-  SCHZ:  "Schwab U.S. Aggregate Bond ETF",
-  SCHP:  "Schwab U.S. TIPS ETF",
-  SCHO:  "Schwab Short-Term U.S. Treasury ETF",
-  SCHR:  "Schwab Intermediate-Term U.S. Treasury ETF",
-  SCHQ:  "Schwab Long-Term U.S. Treasury ETF",
-  SCHI:  "Schwab 5-10 Year Corp Bond ETF",
-  SCHJ:  "Schwab 1-5 Year Corp Bond ETF",
-  SCHD:  "Schwab U.S. Dividend Equity ETF",
-  SCHH:  "Schwab U.S. REIT ETF",
-  SCCR:  "Schwab (label TBD)",
-  SMBS:  "Schwab (label TBD)",
-  SCUS:  "Schwab (label TBD)",
+  SCHB: "Schwab U.S. Broad Market ETF",
+  SCHX: "Schwab U.S. Large-Cap ETF",
+  SCHG: "Schwab U.S. Large-Cap Growth ETF",
+  SCHV: "Schwab U.S. Large-Cap Value ETF",
+  SCHA: "Schwab U.S. Small-Cap ETF",
+  SCHM: "Schwab U.S. Mid-Cap ETF",
+  SCHF: "Schwab International Equity ETF",
+  SCHE: "Schwab Emerging Markets Equity ETF",
+  SCHC: "Schwab International Small-Cap Equity ETF",
+  SCHZ: "Schwab U.S. Aggregate Bond ETF",
+  SCHP: "Schwab U.S. TIPS ETF",
+  SCHO: "Schwab Short-Term U.S. Treasury ETF",
+  SCHR: "Schwab Intermediate-Term U.S. Treasury ETF",
+  SCHQ: "Schwab Long-Term U.S. Treasury ETF",
+  SCHI: "Schwab 5-10 Year Corp Bond ETF",
+  SCHJ: "Schwab 1-5 Year Corp Bond ETF",
+  SCHD: "Schwab U.S. Dividend Equity ETF",
+  SCHH: "Schwab U.S. REIT ETF",
+  SCCR: "Schwab (label TBD)",
+  SMBS: "Schwab (label TBD)",
+  SCUS: "Schwab (label TBD)",
 
   // State Street / SPDR (subset)
-  SPY:   "SPDR S&P 500 ETF Trust",
-  SPLG:  "SPDR Portfolio S&P 500 ETF",
-  SPMD:  "SPDR Portfolio Mid Cap ETF",
-  SPSM:  "SPDR Portfolio Small Cap ETF",
-  SPYG:  "SPDR Portfolio S&P 500 Growth ETF",
-  SPYV:  "SPDR Portfolio S&P 500 Value ETF",
-  XLK:   "Technology Select Sector SPDR",
-  XLF:   "Financial Select Sector SPDR",
-  XLV:   "Health Care Select Sector SPDR",
-  XLE:   "Energy Select Sector SPDR",
-  XLC:   "Communication Services Select Sector SPDR",
-  XLY:   "Consumer Discretionary Select Sector SPDR",
-  XLRE:  "Real Estate Select Sector SPDR",
-  XLI:   "Industrial Select Sector SPDR",
-  XLB:   "Materials Select Sector SPDR",
-  XLU:   "Utilities Select Sector SPDR",
-  XBI:   "SPDR S&P Biotech ETF",
-  SPHD:  "Invesco S&P 500 High Dividend Low Volatility ETF",
-  SPIP:  "SPDR Portfolio TIPS ETF",
-  SPHY:  "SPDR Portfolio High Yield Bond ETF",
-  STOT:  "SPDR DoubleLine Short Term Total Return",
-  TOTL:  "SPDR DoubleLine Total Return",
-  OBND:  "SPDR Loomis Sayles Opportunistic Bond",
-  SRLN:  "SPDR Blackstone Senior Loan ETF",
-  PRIV:  "SPDR (label TBD)",
-  MDY:   "SPDR S&P MidCap 400 ETF Trust",
-  DIA:   "SPDR Dow Jones Industrial Average ETF Trust",
+  SPY: "SPDR S&P 500 ETF Trust",
+  SPLG: "SPDR Portfolio S&P 500 ETF",
+  SPMD: "SPDR Portfolio Mid Cap ETF",
+  SPSM: "SPDR Portfolio Small Cap ETF",
+  SPYG: "SPDR Portfolio S&P 500 Growth ETF",
+  SPYV: "SPDR Portfolio S&P 500 Value ETF",
+  XLK: "Technology Select Sector SPDR",
+  XLF: "Financial Select Sector SPDR",
+  XLV: "Health Care Select Sector SPDR",
+  XLE: "Energy Select Sector SPDR",
+  XLC: "Communication Services Select Sector SPDR",
+  XLY: "Consumer Discretionary Select Sector SPDR",
+  XLRE: "Real Estate Select Sector SPDR",
+  XLI: "Industrial Select Sector SPDR",
+  XLB: "Materials Select Sector SPDR",
+  XLU: "Utilities Select Sector SPDR",
+  XBI: "SPDR S&P Biotech ETF",
+  SPHD: "Invesco S&P 500 High Dividend Low Volatility ETF",
+  SPIP: "SPDR Portfolio TIPS ETF",
+  SPHY: "SPDR Portfolio High Yield Bond ETF",
+  STOT: "SPDR DoubleLine Short Term Total Return",
+  TOTL: "SPDR DoubleLine Total Return",
+  OBND: "SPDR Loomis Sayles Opportunistic Bond",
+  SRLN: "SPDR Blackstone Senior Loan ETF",
+  PRIV: "SPDR (label TBD)",
+  MDY: "SPDR S&P MidCap 400 ETF Trust",
+  DIA: "SPDR Dow Jones Industrial Average ETF Trust",
 
   // BlackRock / iShares (subset)
-  IVV:   "iShares Core S&P 500 ETF",
-  ITOT:  "iShares Core S&P Total U.S. Stock Market ETF",
-  IEMG:  "iShares Core MSCI Emerging Markets ETF",
-  IEFA:  "iShares Core MSCI EAFE ETF",
-  IEUR:  "iShares Core MSCI Europe ETF",
-  IJH:   "iShares Core S&P Mid-Cap ETF",
-  IJR:   "iShares Core S&P Small-Cap ETF",
-  AGG:   "iShares Core U.S. Aggregate Bond ETF",
-  IUSB:  "iShares Core Total USD Bond Market ETF",
-  IUSG:  "iShares Core S&P U.S. Growth ETF",
-  IUSV:  "iShares Core S&P U.S. Value ETF",
-  ILTB:  "iShares Core Long-Term U.S. Bond ETF",
-  IMTB:  "iShares Core 5-10 Year USD Bond ETF",
-  IXUS:  "iShares Core MSCI Total International Stock ETF",
-  IWB:   "iShares Russell 1000 ETF",
-  IVE:   "iShares S&P 500 Value ETF",
-  IVW:   "iShares S&P 500 Growth ETF",
-  IWD:   "iShares Russell 1000 Value ETF",
-  DVY:   "iShares Select Dividend ETF",
-  DIVB:  "iShares U.S. Dividend and Buyback ETF",
-  USRT:  "iShares Core U.S. REIT ETF",
-  IAGG:  "iShares Core Intl Aggregate Bond ETF",
-  IYC:   "iShares U.S. Consumer Discretionary ETF",
-  IYK:   "iShares U.S. Consumer Staples ETF",
-  IYE:   "iShares U.S. Energy ETF",
-  IXJ:   "iShares Global Healthcare ETF",
+  IVV: "iShares Core S&P 500 ETF",
+  ITOT: "iShares Core S&P Total U.S. Stock Market ETF",
+  IEMG: "iShares Core MSCI Emerging Markets ETF",
+  IEFA: "iShares Core MSCI EAFE ETF",
+  IEUR: "iShares Core MSCI Europe ETF",
+  IJH: "iShares Core S&P Mid-Cap ETF",
+  IJR: "iShares Core S&P Small-Cap ETF",
+  AGG: "iShares Core U.S. Aggregate Bond ETF",
+  IUSB: "iShares Core Total USD Bond Market ETF",
+  IUSG: "iShares Core S&P U.S. Growth ETF",
+  IUSV: "iShares Core S&P U.S. Value ETF",
+  ILTB: "iShares Core Long-Term U.S. Bond ETF",
+  IMTB: "iShares Core 5-10 Year USD Bond ETF",
+  IXUS: "iShares Core MSCI Total International Stock ETF",
+  IWB: "iShares Russell 1000 ETF",
+  IVE: "iShares S&P 500 Value ETF",
+  IVW: "iShares S&P 500 Growth ETF",
+  IWD: "iShares Russell 1000 Value ETF",
+  DVY: "iShares Select Dividend ETF",
+  DIVB: "iShares U.S. Dividend and Buyback ETF",
+  USRT: "iShares Core U.S. REIT ETF",
+  IAGG: "iShares Core Intl Aggregate Bond ETF",
+  IYC: "iShares U.S. Consumer Discretionary ETF",
+  IYK: "iShares U.S. Consumer Staples ETF",
+  IYE: "iShares U.S. Energy ETF",
+  IXJ: "iShares Global Healthcare ETF",
 
   // Invesco (subset)
-  QQQ:   "Invesco QQQ Trust",
-  QQQM:  "Invesco NASDAQ-100 ETF",
-  SPHQ:  "Invesco S&P 500 Quality ETF",
-  SPMO:  "Invesco S&P 500 Momentum ETF",
-  RSP:   "Invesco S&P 500 Equal Weight ETF",
-  XLG:   "Invesco S&P 500 Top 50 ETF",
-  PBUS:  "Invesco PureBeta MSCI USA ETF",
-  SPLV:  "Invesco S&P 500 Low Volatility ETF",
-  BKLN:  "Invesco Senior Loan ETF",
-  RWL:   "Invesco S&P 500 Revenue ETF",
-  PRF:   "Invesco FTSE RAFI US 1000 ETF",
-  PSCT:  "Invesco S&P SmallCap Info Tech ETF",
-  SPHD:  "Invesco S&P 500 High Dividend Low Volatility ETF",
-  XMMO:  "Invesco S&P MidCap Momentum ETF",
-  XMVM:  "Invesco S&P MidCap Value w/ Momentum ETF",
-  XMHQ:  "Invesco S&P MidCap Quality ETF",
-  SPHB:  "Invesco S&P 500 High Beta ETF",
-  PSR:   "Invesco Active U.S. Real Estate ETF",
-  CSD:   "Invesco Spin-Off ETF",
+  QQQ: "Invesco QQQ Trust",
+  QQQM: "Invesco NASDAQ-100 ETF",
+  SPHQ: "Invesco S&P 500 Quality ETF",
+  SPMO: "Invesco S&P 500 Momentum ETF",
+  RSP: "Invesco S&P 500 Equal Weight ETF",
+  XLG: "Invesco S&P 500 Top 50 ETF",
+  PBUS: "Invesco PureBeta MSCI USA ETF",
+  SPLV: "Invesco S&P 500 Low Volatility ETF",
+  BKLN: "Invesco Senior Loan ETF",
+  RWL: "Invesco S&P 500 Revenue ETF",
+  PRF: "Invesco FTSE RAFI US 1000 ETF",
+  PSCT: "Invesco S&P SmallCap Info Tech ETF",
+  SPHD: "Invesco S&P 500 High Dividend Low Volatility ETF",
+  XMMO: "Invesco S&P MidCap Momentum ETF",
+  XMVM: "Invesco S&P MidCap Value w/ Momentum ETF",
+  XMHQ: "Invesco S&P MidCap Quality ETF",
+  SPHB: "Invesco S&P 500 High Beta ETF",
+  PSR: "Invesco Active U.S. Real Estate ETF",
+  CSD: "Invesco Spin-Off ETF",
 };
 
 // Prefer “TICKER — Name”, fall back to just ticker if unknown
@@ -275,11 +274,7 @@ function labelFor(t: string): string {
 function NewLineHint({ symbol }: { symbol: string }) {
   const name = FUND_LABELS[(symbol || "").toUpperCase()];
   if (!name) return null;
-  return (
-    <div className="col-span-12 -mt-2 text-xs text-gray-500">
-      {name}
-    </div>
-  );
+  return <div className="col-span-12 -mt-2 text-xs text-gray-500">{name}</div>;
 }
 
 // ---- Stepper (mobile-friendly) ----
@@ -371,7 +366,7 @@ function Stepper({ current = 1 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-/** 
+/**
  * Split into wrapper + inner to satisfy Next’s requirement:
  * any use of useSearchParams() must live under a <Suspense> boundary.
  */
@@ -382,9 +377,7 @@ export default function NewGradePage() {
         <main className="mx-auto max-w-3xl p-6 space-y-6">
           <Stepper current={1} />
           <h1 className="text-2xl font-bold">Get your grade</h1>
-          <div className="rounded border bg-white p-4 text-sm text-gray-600">
-            Loading…
-          </div>
+          <div className="rounded border bg-white p-4 text-sm text-gray-600">Loading…</div>
         </main>
       }
     >
@@ -406,17 +399,17 @@ function NewGradePageInner() {
     { symbol: "FXNAX", weight: 40 },
   ]);
 
-  // ✅ HYDRATE FROM previewId (server) OR localStorage (fallback)
+  // ✅ HYDRATE FROM previewId
   useEffect(() => {
     let cancelled = false;
 
     async function hydrateFromPreview(id: string) {
       try {
         const res = await fetch(`/api/preview/${encodeURIComponent(id)}`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-    });
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error("not ok");
         const data = await res.json();
 
@@ -435,12 +428,7 @@ function NewGradePageInner() {
           setRows(nextRows);
         }
       } catch {
-        // Optional localStorage fallback (id already stored as gy4k_preview_id after save)
-        try {
-          const lastId = localStorage.getItem("gy4k_preview_id") || "";
-          if (lastId !== id) return;
-          // If you later store a snapshot, you can restore it here.
-        } catch {}
+        /* optional localStorage fallback if you add it later */
       }
     }
 
@@ -453,17 +441,9 @@ function NewGradePageInner() {
   // Provider fund list (toggle)
   const [showCatalog, setShowCatalog] = useState(false);
 
-  // When provider === "other", show union of all provider tickers (deduped)
-  const allFunds = useMemo(() => {
-    const merged = Object.entries(PROVIDER_FUNDS)
-      .filter(([key]) => key !== "other")
-      .flatMap(([, arr]) => arr);
-    return Array.from(new Set(merged));
-  }, []);
-
   const providerList = useMemo(
-    () => (provider === "other" ? allFunds : (PROVIDER_FUNDS[provider] || [])),
-    [provider, allFunds]
+    () => PROVIDER_FUNDS[provider] || [],
+    [provider]
   );
 
   const [selectedFromList, setSelectedFromList] = useState<string>("");
@@ -599,7 +579,6 @@ function NewGradePageInner() {
           <option value="vanguard">Vanguard</option>
           <option value="schwab">Charles Schwab</option>
           <option value="voya">Voya</option>
-          <option value="other">Other</option>
         </select>
       </section>
 
@@ -640,7 +619,7 @@ function NewGradePageInner() {
                 onChange={(e) => setSelectedFromList(e.target.value)}
               >
                 <option value="">Choose a fund…</option>
-                {providerList.map((t) => (
+                {(PROVIDER_FUNDS[provider] || []).map((t) => (
                   <option key={t} value={t} title={labelFor(t)}>
                     {labelFor(t)}
                   </option>
