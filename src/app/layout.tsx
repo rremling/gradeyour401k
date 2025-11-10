@@ -26,7 +26,16 @@ export default function RootLayout({
             Disclosure: GradeYour401k.com is a service of Kenai Investments Inc, a Registered Investment Advisor.
             Advisory services offered through Kenai Investments Inc.
           </p>
-          <p className="mt-1">© KenaiInvest.com</p>
+          <p className="mt-1">
+            <a
+              href="https://KenaiInvest.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              KenaiInvest.com
+            </a>
+          </p>
         </footer>
 
         <Analytics /> {/* ✅ send page views & events to Vercel */}
