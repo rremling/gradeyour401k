@@ -22,7 +22,7 @@ type ClientRow = {
   full_name?: string | null;
 };
 
-const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
+const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya"] as const;
 const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 const INCOME_BANDS = ["<75k", "75-150k", "150-300k", "300-600k", "600k+"] as const;
 const US_STATES = [
