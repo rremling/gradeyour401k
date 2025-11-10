@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     const provider = (searchParams.get("provider") || "") as Provider;
     const profile  = (searchParams.get("profile")  || "") as Profile;
 
-    const VALID_PROVIDERS: Provider[] = ["Fidelity","Vanguard","Schwab","Voya","Other"];
+    const VALID_PROVIDERS: Provider[] = ["Fidelity","Vanguard","Schwab","Voya"];
     const VALID_PROFILES:  Profile[]  = ["Growth","Balanced","Conservative"];
 
     if (!VALID_PROVIDERS.includes(provider) || !VALID_PROFILES.includes(profile)) {
