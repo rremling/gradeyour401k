@@ -38,7 +38,7 @@ export async function GET() {
     }
 
     // 2) Build 15 models (5 providers × 3 profiles)
-    const providers = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
+    const providers = ["Fidelity", "Vanguard", "Schwab", "Voya"] as const;
     const profiles = ["Growth", "Balanced", "Conservative"] as const;
 
     for (const provider of providers) {
