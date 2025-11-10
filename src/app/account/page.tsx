@@ -24,7 +24,7 @@ function safeCookie(name: string): string {
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || "";
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" }) : null;
 
-const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya", "Other"] as const;
+const PROVIDERS = ["Fidelity", "Vanguard", "Schwab", "Voya"] as const;
 const PROFILES = ["Growth", "Balanced", "Conservative"] as const;
 
 const ADVISOR_REVIEW_URL = "https://kenaiinvest.appointlet.com/s/401k-review-call/8346";
