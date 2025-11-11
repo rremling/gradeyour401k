@@ -19,7 +19,7 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
       url,
       siteName: "GradeYour401k",
       type: "article",
-      images: [{ url: image, width: 300, height: 300, type: "image/png", alt: "Shared 401(k) Grade" }],
+      images: [{ url: image, width: 600, height: 600, type: "image/png", alt: "Shared 401(k) Grade" }],
     },
     twitter: {
       card: "summary_large_image",
