@@ -20,7 +20,7 @@ function png(text: string, bg = "#111827", fg = "white") {
       <div
         style={{
           width: 1200,
-          height: 630,
+          height: 1200,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -36,7 +36,7 @@ function png(text: string, bg = "#111827", fg = "white") {
     ),
     {
       width: 1200,
-      height: 630,
+      height: 1200,
       headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
     }
   );
@@ -45,10 +45,11 @@ function png(text: string, bg = "#111827", fg = "white") {
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const url = new URL(req.url);
-    const debug = url.searchParams.get("debug") === "1";
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `${url.protocol}//${url.host}`;
+    const logoUrl = `${baseUrl}/logo.png`;
 
     const dbUrl = process.env.DATABASE_URL;
-    if (!dbUrl) return png(debug ? "Missing DATABASE_URL" : "Image render error");
+    if (!dbUrl) return png("Image render error (missing DATABASE_URL)");
 
     const sql = neon(dbUrl);
 
@@ -59,117 +60,140 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         LIMIT 1`;
 
     const data = rows[0];
-    if (!data) return png(debug ? `Shared grade not found: ${params.id}` : "Shared grade not found");
+    if (!data) return png("Shared grade not found");
+
+    const gradeNum = Number(data.grade);
+    const rating = Number.isFinite(gradeNum) ? Math.max(0, Math.min(5, gradeNum)) : 0;
+    const ratingPct = `${(rating / 5) * 100}%`;
 
     const asOf = new Date(data.as_of_date).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
+      month: "short", day: "numeric", year: "numeric",
     });
-    const title = `My 401(k) Grade: ${data.grade} / 5`;
 
     return new ImageResponse(
       (
         <div
           style={{
             width: 1200,
-            height: 630,
+            height: 1200,
             display: "flex",
             flexDirection: "column",
-            background: "#0B1220",
+            background: "#0B1220",       // deep navy
             color: "white",
-            padding: 48,
-            fontSize: 36,
-            justifyContent: "space-between",
+            padding: 64,
+            gap: 36,
             position: "relative",
+            boxSizing: "border-box",
+            justifyContent: "flex-start",
           }}
         >
+          {/* Header: logo + brand */}
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: 16,
-                background: "#2563EB",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 700,
-                fontSize: 28,
-              }}
-            >
-              <div style={{ display: "flex" }}>GY</div>
-            </div>
-            <div style={{ display: "flex", fontWeight: 600, fontSize: 32 }}>GradeYour401k</div>
+            <img
+              src={logoUrl}
+              width={64}
+              height={64}
+              style={{ display: "flex", borderRadius: 12 }}
+              alt=""
+            />
+            <div style={{ display: "flex", fontWeight: 700, fontSize: 36 }}>GradeYour401k</div>
           </div>
 
+          {/* Big Title: 4.5 / 5 + star bar */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", fontSize: 88, fontWeight: 800 }}>
+              {rating.toFixed(1)} / 5
+            </div>
+            {/* Stars (gold overlay technique) */}
+            <div style={{ display: "flex", position: "relative", height: 64 }}>
+              <div
+                style={{
+                  display: "flex",
+                  fontSize: 64,
+                  color: "#d1d5db",          // gray-300
+                  letterSpacing: 6,
+                }}
+              >
+                ★★★★★
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  height: "100%",
+                  overflow: "hidden",
+                  width: ratingPct,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    fontSize: 64,
+                    color: "#facc15",        // yellow-400
+                    letterSpacing: 6,
+                  }}
+                >
+                  ★★★★★
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Info card */}
           <div
             style={{
-              background: "white",
-              color: "#111827",
-              borderRadius: 24,
-              padding: 36,
               display: "flex",
               flexDirection: "column",
-              gap: 18,
-              boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
+              background: "white",
+              color: "#111827",
+              borderRadius: 32,
+              padding: 40,
+              gap: 22,
+              boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
             }}
           >
-            <div style={{ display: "flex", fontSize: 28, color: "#4B5563" }}>Provider</div>
+            <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Provider</div>
             <div style={{ display: "flex", fontSize: 44, fontWeight: 700 }}>{data.provider}</div>
 
-            <div style={{ display: "flex", gap: 40 }}>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Profile</div>
+            <div style={{ display: "flex", gap: 48, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 280 }}>
+                <div style={{ display: "flex", fontSize: 22, color: "#4B5563" }}>Profile</div>
                 <div style={{ display: "flex", fontSize: 40, fontWeight: 600 }}>{data.profile}</div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Grade</div>
-                <div style={{ display: "flex", fontSize: 64, fontWeight: 800 }}>{data.grade} / 5</div>
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 280 }}>
+                <div style={{ display: "flex", fontSize: 22, color: "#4B5563" }}>As of</div>
+                <div style={{ display: "flex", fontSize: 36, fontWeight: 600 }}>{asOf}</div>
               </div>
+              {data.sentiment && (
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 280 }}>
+                  <div style={{ display: "flex", fontSize: 22, color: "#4B5563" }}>Market Sentiment</div>
+                  <div style={{ display: "flex", fontSize: 36, fontWeight: 600 }}>{data.sentiment}</div>
+                </div>
+              )}
             </div>
-
-            {data.sentiment && (
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Market Sentiment</div>
-                <div style={{ display: "flex", fontSize: 36, fontWeight: 600 }}>{data.sentiment}</div>
-              </div>
-            )}
-
-            <div style={{ display: "flex", fontSize: 22, color: "#6B7280" }}>As of {asOf}</div>
           </div>
 
+          {/* Footer CTA (single line, no redundant bottom-right text) */}
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              fontSize: 28,
+              marginTop: "auto",
+              fontSize: 26,
+              color: "#9CA3AF",
             }}
           >
             <div style={{ display: "flex" }}>Get your own grade → GradeYour401k.com</div>
-            <div style={{ display: "flex", fontSize: 24, color: "#9CA3AF" }}>{title}</div>
+            {/* intentionally nothing else on the right */}
           </div>
-
-          {debug && (
-            <div
-              style={{
-                display: "flex",
-                position: "absolute",
-                right: 24,
-                bottom: 24,
-                fontSize: 18,
-                color: "#9CA3AF",
-              }}
-            >
-              id={params.id}
-            </div>
-          )}
         </div>
       ),
       {
         width: 1200,
-        height: 630,
+        height: 1200,
         headers: {
           "Content-Type": "image/png",
           "Cache-Control": "public, max-age=3600, s-maxage=3600",
