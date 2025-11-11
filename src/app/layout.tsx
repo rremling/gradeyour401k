@@ -1,7 +1,9 @@
 // src/app/layout.tsx
 import "./globals.css";
 import Nav from "./components/Nav";
-import { Analytics } from "@vercel/analytics/react"; // ✅ add this
+import { Analytics } from "@vercel/analytics/react";
+import Image from "next/image";
+import Link from "next/link";
 
 export const metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || "https://gradeyour401k.com"),
@@ -17,7 +19,26 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen flex flex-col bg-gray-50 text-gray-900">
+        {/* ───── Brand bar with logo + title ───── */}
+        <header className="bg-white border-b border-gray-200">
+          <div className="mx-auto max-w-6xl px-4 py-2 flex items-center gap-3">
+            <Link href="/" className="flex items-center gap-3">
+              <Image
+                src="/logo.png"            // place your PNG at /public/logo.png
+                alt="GradeYour401k logo"
+                width={28}
+                height={28}
+                className="rounded-md"
+                priority
+              />
+              <span className="text-base font-semibold">GradeYour401k</span>
+            </Link>
+          </div>
+        </header>
+
+        {/* Existing navigation */}
         <Nav />
+
         <main className="flex-1">{children}</main>
 
         {/* ───── Global Footer ───── */}
@@ -39,7 +60,7 @@ export default function RootLayout({
           </p>
         </footer>
 
-        <Analytics /> {/* ✅ send page views & events to Vercel */}
+        <Analytics />
       </body>
     </html>
   );
