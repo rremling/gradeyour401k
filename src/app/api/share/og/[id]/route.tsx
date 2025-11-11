@@ -107,8 +107,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       (
         <div
           style={{
-            width: 300,
-            height: 300,
+            width: 600,
+            height: 600,
             display: "flex",
             flexDirection: "column",
             background: "#0B1220",
@@ -205,8 +205,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         </div>
       ),
       {
-        width: 300,
-        height: 300,
+        width: 600,
+        height: 600,
         headers: {
           "Content-Type": "image/png",
           "Cache-Control": "public, max-age=3600, s-maxage=3600",
