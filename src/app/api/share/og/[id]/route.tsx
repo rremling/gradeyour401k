@@ -1,11 +1,9 @@
 /* /src/app/api/share/og/[id]/route.tsx */
 import { ImageResponse } from "next/og";
-import { neon, neonConfig } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 
 export const runtime = "edge";
 export const revalidate = 0;
-
-neonConfig.fetchConnectionCache = true;
 
 type ShareRow = {
   provider: string;
@@ -50,14 +48,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const debug = url.searchParams.get("debug") === "1";
 
     const dbUrl = process.env.DATABASE_URL;
-    if (!dbUrl) {
-      return png(debug ? "Missing DATABASE_URL (Edge env)" : "Image render error");
-    }
+    if (!dbUrl) return png(debug ? "Missing DATABASE_URL" : "Image render error");
 
-    // Initialize Neon inside handler so failures are caught
+    // Init Neon inside handler so errors are caught
     const sql = neon(dbUrl);
 
-    // Fetch redacted share row
     const rows = await sql<ShareRow[]>
       `SELECT provider, profile, grade, model_name, sentiment, as_of_date
          FROM public.report_shares
@@ -65,9 +60,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         LIMIT 1`;
 
     const data = rows[0];
-    if (!data) {
-      return png(debug ? `Shared grade not found: ${params.id}` : "Shared grade not found");
-    }
+    if (!data) return png(debug ? `Shared grade not found: ${params.id}` : "Shared grade not found");
 
     const asOf = new Date(data.as_of_date).toLocaleDateString("en-US", {
       month: "short",
@@ -129,18 +122,19 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             <div style={{ fontSize: 44, fontWeight: 700 }}>{data.provider}</div>
 
             <div style={{ display: "flex", gap: 40 }}>
-              <div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
                 <div style={{ fontSize: 24, color: "#4B5563" }}>Profile</div>
                 <div style={{ fontSize: 40, fontWeight: 600 }}>{data.profile}</div>
               </div>
-              <div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
                 <div style={{ fontSize: 24, color: "#4B5563" }}>Grade</div>
                 <div style={{ fontSize: 64, fontWeight: 800 }}>{data.grade} / 5</div>
               </div>
             </div>
 
             {data.sentiment && (
-              <div>
+              // ✅ add explicit display since this wrapper has two children
+              <div style={{ display: "flex", flexDirection: "column" }}>
                 <div style={{ fontSize: 24, color: "#4B5563" }}>Market Sentiment</div>
                 <div style={{ fontSize: 36, fontWeight: 600 }}>{data.sentiment}</div>
               </div>
