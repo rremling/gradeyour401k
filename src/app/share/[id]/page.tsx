@@ -1,4 +1,34 @@
+// at top of /share/[id]/page.tsx
+import type { Metadata } from "next";
 import { Pool } from "pg";
+export const runtime = "nodejs";   // ✅ ensure Node runtime for `pg`
+export const revalidate = 0;       // ✅ always server-render fresh (optional)
+
+export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://gradeyour401k.com";
+  const image = `${baseUrl}/api/share/og/${params.id}`;
+  const url = `${baseUrl}/share/${params.id}`;
+
+  return {
+    title: "Shared 401(k) Grade — GradeYour401k",
+    description: "See this 401(k) grade and get your own in minutes.",
+    openGraph: {
+      title: "Shared 401(k) Grade",
+      description: "See this 401(k) grade and get your own in minutes.",
+      images: [{ url: image }],
+      url,
+      siteName: "GradeYour401k",
+      type: "article",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: "Shared 401(k) Grade",
+      description: "See this 401(k) grade and get your own in minutes.",
+      images: [image],
+    },
+  };
+}
+
 import Link from "next/link";
 import Image from "next/image";
 
