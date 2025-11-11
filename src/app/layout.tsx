@@ -19,29 +19,25 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen flex flex-col bg-gray-50 text-gray-900">
-        {/* ───── Brand bar with logo + title ───── */}
-        <header className="bg-white border-b border-gray-200">
-          <div className="mx-auto max-w-6xl px-4 py-2 flex items-center gap-3">
-            <Link href="/" className="flex items-center gap-3">
-              <Image
-                src="/logo.png"            // place your PNG at /public/logo.png
-                alt="GradeYour401k logo"
-                width={28}
-                height={28}
-                className="rounded-md"
-                priority
-              />
-              <span className="text-base font-semibold">GradeYour401k</span>
-            </Link>
-          </div>
-        </header>
+        {/* Add logo + title bar above Nav */}
+        <div className="flex items-center gap-2 px-4 pt-3">
+          <Link href="/" className="flex items-center gap-2">
+            <Image
+              src="/logo.png"
+              alt="GradeYour401k logo"
+              width={28}
+              height={28}
+              className="rounded-md"
+              priority
+            />
+            <span className="text-lg font-semibold">GradeYour401k</span>
+          </Link>
+        </div>
 
-        {/* Existing navigation */}
         <Nav />
 
         <main className="flex-1">{children}</main>
 
-        {/* ───── Global Footer ───── */}
         <footer className="text-center text-xs text-gray-500 border-t border-gray-200 pt-4 pb-6 bg-white">
           <p>© GradeYour401k.com</p>
           <p className="mt-1">
