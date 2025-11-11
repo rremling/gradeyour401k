@@ -7,9 +7,9 @@ export const metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || "https://gradeyour401k.com"),
   title: "GradeYour401k",
   description: "Get your 401k graded and optimized",
-   icons: {
-    icon: "/favicon.ico",
-    apple: "/apple-touch-icon.png",
+  icons: {
+    icon: "/favicon.ico?v=3",
+    apple: "/apple-touch-icon.png?v=3",
   },
 };
 
