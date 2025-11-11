@@ -11,7 +11,7 @@ export const metadata = {
     icon: "/favicon.ico?v=5",
     apple: "/apple-touch-icon.png?v=5",
   },
-  manifest: "/manifest.json", 
+  manifest: "/manifest.webmanifest", 
 };
 
 export default function RootLayout({
