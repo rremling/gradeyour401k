@@ -61,6 +61,11 @@ export default async function SharePage({ params }: { params: { id: string } }) 
     );
   }
 
+  // ── Star rating prep (e.g., 4.5 -> 4.5 / 5 + stars) ───────────────────────
+  const gradeNum = Number(data.grade);
+  const rating = Number.isFinite(gradeNum) ? Math.max(0, Math.min(5, gradeNum)) : 0;
+  const ratingPct = `${(rating / 5) * 100}%`;
+
   return (
     <main className="max-w-xl mx-auto p-6">
       {/* Brand/header */}
@@ -87,9 +92,21 @@ export default async function SharePage({ params }: { params: { id: string } }) 
             <div className="text-sm text-gray-500 mb-1">Profile</div>
             <div className="font-medium">{data.profile}</div>
           </div>
+
+          {/* ── Grade with stars and 4.5 / 5 ── */}
           <div>
             <div className="text-sm text-gray-500 mb-1">Grade</div>
-            <div className="text-2xl font-bold">{data.grade}</div>
+            <div className="flex items-center gap-2">
+              {/* Stars */}
+              <div className="relative inline-block align-middle" aria-label={`${rating.toFixed(1)} out of 5`}>
+                <div className="text-xl text-gray-300 tracking-[2px] select-none">★★★★★</div>
+                <div className="absolute left-0 top-0 h-full overflow-hidden" style={{ width: ratingPct }}>
+                  <div className="text-xl text-yellow-500 tracking-[2px] select-none">★★★★★</div>
+                </div>
+              </div>
+              {/* Numeric */}
+              <div className="text-2xl font-bold">{rating.toFixed(1)} / 5</div>
+            </div>
           </div>
         </div>
 
@@ -107,7 +124,9 @@ export default async function SharePage({ params }: { params: { id: string } }) 
           </div>
         )}
 
-        <div className="mt-4 text-sm text-gray-500">As of {new Date(data.as_of_date).toLocaleDateString()}</div>
+        <div className="mt-4 text-sm text-gray-500">
+          As of {new Date(data.as_of_date).toLocaleDateString()}
+        </div>
       </div>
 
       {/* CTA */}
