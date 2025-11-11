@@ -1,8 +1,9 @@
 // at top of /share/[id]/page.tsx
 import type { Metadata } from "next";
 import { Pool } from "pg";
+
 export const runtime = "nodejs";   // ✅ ensure Node runtime for `pg`
-export const revalidate = 0;       // ✅ always server-render fresh (optional)
+export const revalidate = 0;       // ✅ always server-render fresh
 
 export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://gradeyour401k.com";
@@ -18,7 +19,7 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
       url,
       siteName: "GradeYour401k",
       type: "article",
-      images: [{ url: image, width: 1200, height: 630 }],
+      images: [{ url: image, width: 1200, height: 630, type: "image/png", alt: "Shared 401(k) Grade" }],
     },
     twitter: {
       card: "summary_large_image",
@@ -26,9 +27,9 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
       description: "See this 401(k) grade and get your own in minutes.",
       images: [image], // 1200x630
     },
+    alternates: { canonical: url },
   };
 }
-
 
 import Link from "next/link";
 import Image from "next/image";
@@ -64,7 +65,15 @@ export default async function SharePage({ params }: { params: { id: string } }) 
     <main className="max-w-xl mx-auto p-6">
       {/* Brand/header */}
       <div className="flex items-center gap-3 mb-6">
-        <Image src="/logo.png" alt="GradeYour401k" width={36} height={36} />
+        <Image
+          src="/logo.png"            // served from /public/logo.png
+          alt="GradeYour401k logo"
+          width={36}
+          height={36}
+          className="rounded-lg"
+          priority
+          sizes="36px"
+        />
         <h1 className="text-2xl font-semibold">Shared 401(k) Grade</h1>
       </div>
 
