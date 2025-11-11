@@ -146,6 +146,7 @@ export default function ResultsClient() {
 
   // ─── NEW: share state ──────────────────────────────────────────────────────
   const [shareUrl, setShareUrl] = useState<string>("");
+  const [shareId, setShareId] = useState<string>(""); // <-- NEW: store id for image download
   const [shareWorking, setShareWorking] = useState<boolean>(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -187,6 +188,7 @@ export default function ResultsClient() {
 
       const url = `${window.location.origin}/share/${data.id}`;
       setShareUrl(url);
+      setShareId(data.id); // <-- NEW: save the id for OG image download
 
       // Try to invoke native share right away; if not supported, UI shows buttons.
       if (navigator.share) {
@@ -213,6 +215,19 @@ export default function ResultsClient() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
+  }
+
+  // NEW: download the OG image PNG for the created share id
+  async function handleDownloadImage() {
+    if (!shareId) return;
+    const res = await fetch(`/api/share/og/${encodeURIComponent(shareId)}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "my-401k-grade.png";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -290,6 +305,11 @@ export default function ResultsClient() {
   const xUrl  = shareUrl ? `https://twitter.com/intent/tweet?text=${enc("Just got my 401(k) graded on GradeYour401k!")}&url=${enc(shareUrl)}` : "";
   const liUrl = shareUrl ? `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}` : "";
   const fbUrl = shareUrl ? `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}` : "";
+  const emailHref = shareUrl
+    ? `mailto:?subject=${enc("I graded my 401(k) today")}&body=${enc(
+        `I graded my 401(k) today — here’s my grade:\n\n${shareUrl}\n\nGet your own at GradeYour401k.com`
+      )}`
+    : "";
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
@@ -378,6 +398,14 @@ export default function ResultsClient() {
                     <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={fbUrl} target="_blank" rel="noopener noreferrer">
                       Share on Facebook
                     </a>
+                    {/* NEW: Share via Email */}
+                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={emailHref}>
+                      Share via Email
+                    </a>
+                    {/* NEW: Download share image */}
+                    <button onClick={handleDownloadImage} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
+                      Download share image
+                    </button>
                     <button onClick={copyLink} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
                       {copied ? "Copied!" : "Copy link"}
                     </button>
