@@ -8,8 +8,8 @@ export const metadata = {
   title: "GradeYour401k",
   description: "Get your 401k graded and optimized",
   icons: {
-    icon: "/favicon.ico?v=3",
-    apple: "/apple-touch-icon.png?v=3",
+    icon: "/favicon.ico?v=4",
+    apple: "/apple-touch-icon.png?v=4",
   },
 };
 
