@@ -34,15 +34,14 @@ function png(text: string, bg = "#0B1220", fg = "white") {
         <div style={{ display: "flex" }}>{text}</div>
       </div>
     ),
-    { width: 300, height: 300, headers: { "Content-Type": "image/png", "Cache-Control": "no-store" } }
+    { width: 300, height: 300, headers: { "Content-Type": "image/png" } }
   );
 }
 
-// Simple SVG star component for @vercel/og
+/* ─────────────────── SVG Stars ─────────────────── */
 function Star({ fill = "#d1d5db" }: { fill?: string }) {
-  // 5-point star path (viewBox 24x24)
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24">
+    <svg width="18" height="18" viewBox="0 0 24 24">
       <path
         d="M12 2.5l2.95 5.98 6.6.96-4.78 4.66 1.13 6.59L12 17.98 6.1 20.69l1.13-6.59L2.44 9.44l6.6-.96L12 2.5z"
         fill={fill}
@@ -51,10 +50,9 @@ function Star({ fill = "#d1d5db" }: { fill?: string }) {
   );
 }
 
-// Half-filled star using clipPath
 function HalfStar() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24">
+    <svg width="18" height="18" viewBox="0 0 24 24">
       <defs>
         <clipPath id="halfClip">
           <rect x="0" y="0" width="12" height="24" />
@@ -73,6 +71,7 @@ function HalfStar() {
   );
 }
 
+/* ─────────────────── Route ─────────────────── */
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const reqUrl = new URL(req.url);
@@ -88,18 +87,20 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
          FROM public.report_shares
         WHERE id = ${params.id}
         LIMIT 1`;
+
     const data = rows[0];
     if (!data) return png("Shared grade not found");
 
     const gradeNum = Number(data.grade);
     const ratingRaw = Number.isFinite(gradeNum) ? Math.max(0, Math.min(5, gradeNum)) : 0;
-    // Round to nearest 0.5 for star display
     const rating = Math.round(ratingRaw * 2) / 2;
     const full = Math.floor(rating);
     const hasHalf = rating - full >= 0.5;
 
     const asOf = new Date(data.as_of_date).toLocaleDateString("en-US", {
-      month: "short", day: "numeric", year: "numeric",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
 
     return new ImageResponse(
@@ -119,16 +120,22 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           }}
         >
           {/* Header: logo + brand */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <img src={logoUrl} width={20} height={20} style={{ display: "flex", borderRadius: 4 }} alt="" />
-            <div style={{ display: "flex", fontWeight: 700, fontSize: 14 }}>GradeYour401k</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <img
+              src={logoUrl}
+              width={20}
+              height={20}
+              style={{ display: "flex", borderRadius: 4 }}
+              alt=""
+            />
+            <div style={{ display: "flex", fontWeight: 700, fontSize: 13 }}>GradeYour401k</div>
           </div>
 
           {/* Headline */}
           <div
             style={{
               display: "flex",
-              fontSize: 14,
+              fontSize: 13,
               lineHeight: 1.2,
               color: "#e5e7eb",
               fontWeight: 500,
@@ -138,13 +145,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           </div>
 
           {/* Big Grade */}
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <div style={{ display: "flex", fontSize: 44, fontWeight: 800 }}>{ratingRaw.toFixed(1)}</div>
-            <div style={{ display: "flex", fontSize: 20, fontWeight: 700, color: "#a3a3a3" }}>/ 5</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+            <div style={{ fontSize: 36, fontWeight: 800 }}>{ratingRaw.toFixed(1)}</div>
+            <div style={{ fontSize: 36, fontWeight: 600, color: "#a3a3a3" }}>/ 5</div>
           </div>
 
           {/* Stars */}
-          <div style={{ display: "flex", gap: 4 }}>
+          <div style={{ display: "flex", gap: 2 }}>
             {Array.from({ length: full }).map((_, i) => (
               <Star key={`full-${i}`} fill="#facc15" />
             ))}
@@ -154,7 +161,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             ))}
           </div>
 
-          {/* White card with context */}
+          {/* White info card */}
           <div
             style={{
               display: "flex",
@@ -167,17 +174,17 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
               marginTop: 6,
             }}
           >
-            <div style={{ display: "flex", fontSize: 10, color: "#4B5563" }}>Provider</div>
-            <div style={{ display: "flex", fontSize: 14, fontWeight: 700 }}>{data.provider}</div>
+            <div style={{ fontSize: 9, color: "#4B5563" }}>Provider</div>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{data.provider}</div>
 
-            <div style={{ display: "flex", gap: 16 }}>
+            <div style={{ display: "flex", gap: 12 }}>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ display: "flex", fontSize: 10, color: "#4B5563" }}>Profile</div>
-                <div style={{ display: "flex", fontSize: 12, fontWeight: 600 }}>{data.profile}</div>
+                <div style={{ fontSize: 9, color: "#4B5563" }}>Profile</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{data.profile}</div>
               </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ display: "flex", fontSize: 10, color: "#4B5563" }}>As of</div>
-                <div style={{ display: "flex", fontSize: 12, fontWeight: 600 }}>{asOf}</div>
+                <div style={{ fontSize: 9, color: "#4B5563" }}>As of</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{asOf}</div>
               </div>
             </div>
           </div>
@@ -187,13 +194,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             style={{
               display: "flex",
               marginTop: "auto",
-              fontSize: 11,
+              fontSize: 10,
               color: "#9CA3AF",
               justifyContent: "space-between",
               width: "100%",
             }}
           >
-            <div style={{ display: "flex" }}>Get your own grade → GradeYour401k.com</div>
+            <div>Get your own grade → GradeYour401k.com</div>
           </div>
         </div>
       ),
