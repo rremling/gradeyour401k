@@ -31,7 +31,7 @@ function png(text: string, bg = "#111827", fg = "white") {
           textAlign: "center",
         }}
       >
-        {text}
+        <div style={{ display: "flex" }}>{text}</div>
       </div>
     ),
     {
@@ -50,7 +50,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const dbUrl = process.env.DATABASE_URL;
     if (!dbUrl) return png(debug ? "Missing DATABASE_URL" : "Image render error");
 
-    // Init Neon inside handler so errors are caught
     const sql = neon(dbUrl);
 
     const rows = await sql<ShareRow[]>
@@ -85,7 +84,6 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             position: "relative",
           }}
         >
-          {/* Header */}
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div
               style={{
@@ -100,12 +98,11 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
                 fontSize: 28,
               }}
             >
-              GY
+              <div style={{ display: "flex" }}>GY</div>
             </div>
-            <div style={{ fontWeight: 600, fontSize: 32 }}>GradeYour401k</div>
+            <div style={{ display: "flex", fontWeight: 600, fontSize: 32 }}>GradeYour401k</div>
           </div>
 
-          {/* Card */}
           <div
             style={{
               background: "white",
@@ -118,32 +115,30 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
               boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
             }}
           >
-            <div style={{ fontSize: 28, color: "#4B5563" }}>Provider</div>
-            <div style={{ fontSize: 44, fontWeight: 700 }}>{data.provider}</div>
+            <div style={{ display: "flex", fontSize: 28, color: "#4B5563" }}>Provider</div>
+            <div style={{ display: "flex", fontSize: 44, fontWeight: 700 }}>{data.provider}</div>
 
             <div style={{ display: "flex", gap: 40 }}>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ fontSize: 24, color: "#4B5563" }}>Profile</div>
-                <div style={{ fontSize: 40, fontWeight: 600 }}>{data.profile}</div>
+                <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Profile</div>
+                <div style={{ display: "flex", fontSize: 40, fontWeight: 600 }}>{data.profile}</div>
               </div>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ fontSize: 24, color: "#4B5563" }}>Grade</div>
-                <div style={{ fontSize: 64, fontWeight: 800 }}>{data.grade} / 5</div>
+                <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Grade</div>
+                <div style={{ display: "flex", fontSize: 64, fontWeight: 800 }}>{data.grade} / 5</div>
               </div>
             </div>
 
             {data.sentiment && (
-              // ✅ add explicit display since this wrapper has two children
               <div style={{ display: "flex", flexDirection: "column" }}>
-                <div style={{ fontSize: 24, color: "#4B5563" }}>Market Sentiment</div>
-                <div style={{ fontSize: 36, fontWeight: 600 }}>{data.sentiment}</div>
+                <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Market Sentiment</div>
+                <div style={{ display: "flex", fontSize: 36, fontWeight: 600 }}>{data.sentiment}</div>
               </div>
             )}
 
-            <div style={{ fontSize: 22, color: "#6B7280" }}>As of {asOf}</div>
+            <div style={{ display: "flex", fontSize: 22, color: "#6B7280" }}>As of {asOf}</div>
           </div>
 
-          {/* Footer CTA */}
           <div
             style={{
               display: "flex",
@@ -152,13 +147,14 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
               fontSize: 28,
             }}
           >
-            <div>Get your own grade → GradeYour401k.com</div>
-            <div style={{ fontSize: 24, color: "#9CA3AF" }}>{title}</div>
+            <div style={{ display: "flex" }}>Get your own grade → GradeYour401k.com</div>
+            <div style={{ display: "flex", fontSize: 24, color: "#9CA3AF" }}>{title}</div>
           </div>
 
           {debug && (
             <div
               style={{
+                display: "flex",
                 position: "absolute",
                 right: 24,
                 bottom: 24,
