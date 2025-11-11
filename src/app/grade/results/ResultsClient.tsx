@@ -146,7 +146,7 @@ export default function ResultsClient() {
 
   // ─── NEW: share state ──────────────────────────────────────────────────────
   const [shareUrl, setShareUrl] = useState<string>("");
-  const [shareId, setShareId] = useState<string>(""); // <-- NEW: store id for image download
+  const [shareId, setShareId] = useState<string>(""); // store id for image download
   const [shareWorking, setShareWorking] = useState<boolean>(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -188,20 +188,10 @@ export default function ResultsClient() {
 
       const url = `${window.location.origin}/share/${data.id}`;
       setShareUrl(url);
-      setShareId(data.id); // <-- NEW: save the id for OG image download
+      setShareId(data.id);
 
-      // Try to invoke native share right away; if not supported, UI shows buttons.
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: "My 401(k) Grade",
-            text: "Just got my 401(k) graded on GradeYour401k!",
-            url,
-          });
-        } catch {
-          // user canceled -> just leave the buttons visible
-        }
-      }
+      // NOTE: removed automatic navigator.share invocation
+      // Clicking "Share your grade" now only reveals the menu.
     } catch (e: any) {
       setShareError(e?.message || "Could not create share link.");
     } finally {
@@ -217,7 +207,7 @@ export default function ResultsClient() {
     });
   }
 
-  // NEW: download the OG image PNG for the created share id
+  // download the OG image PNG for the created share id
   async function handleDownloadImage() {
     if (!shareId) return;
     const res = await fetch(`/api/share/og/${encodeURIComponent(shareId)}`);
@@ -305,11 +295,6 @@ export default function ResultsClient() {
   const xUrl  = shareUrl ? `https://twitter.com/intent/tweet?text=${enc("Just got my 401(k) graded on GradeYour401k!")}&url=${enc(shareUrl)}` : "";
   const liUrl = shareUrl ? `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}` : "";
   const fbUrl = shareUrl ? `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}` : "";
-  const emailHref = shareUrl
-    ? `mailto:?subject=${enc("I graded my 401(k) today")}&body=${enc(
-        `I graded my 401(k) today — here’s my grade:\n\n${shareUrl}\n\nGet your own at GradeYour401k.com`
-      )}`
-    : "";
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
@@ -390,19 +375,14 @@ export default function ResultsClient() {
                       System Share
                     </button>
                     <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={xUrl} target="_blank" rel="noopener noreferrer">
-                      Post on X
+                      X/Twitter
                     </a>
                     <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={liUrl} target="_blank" rel="noopener noreferrer">
-                      Share on LinkedIn
+                      LinkedIn
                     </a>
                     <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={fbUrl} target="_blank" rel="noopener noreferrer">
-                      Share on Facebook
+                      Facebook
                     </a>
-                    {/* NEW: Share via Email */}
-                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={emailHref}>
-                      Share via Email
-                    </a>
-                    {/* NEW: Download share image */}
                     <button onClick={handleDownloadImage} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
                       Download share image
                     </button>
