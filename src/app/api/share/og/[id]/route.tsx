@@ -5,36 +5,18 @@ import { neon, neonConfig } from "@neondatabase/serverless";
 export const runtime = "edge";
 export const revalidate = 0;
 
-// Improve reliability on Edge
 neonConfig.fetchConnectionCache = true;
-
-const sql = neon(process.env.DATABASE_URL!);
 
 type ShareRow = {
   provider: string;
   profile: string;
-  grade: string;              // stored as text; fine for display
+  grade: string;
   model_name: string | null;
   sentiment: string | null;
-  as_of_date: string;         // ISO date string
+  as_of_date: string;
 };
 
-async function getShare(id: string): Promise<ShareRow | null> {
-  try {
-    const rows = await sql<ShareRow[]>
-      `SELECT provider, profile, grade, model_name, sentiment, as_of_date
-       FROM public.report_shares
-       WHERE id = ${id}
-       LIMIT 1`;
-    return rows[0] ?? null;
-  } catch (err) {
-    // Log to Vercel functions logs
-    console.error("[OG] DB error:", err);
-    return null;
-  }
-}
-
-function errorImage(message: string) {
+function png(text: string, bg = "#111827", fg = "white") {
   return new ImageResponse(
     (
       <div
@@ -44,14 +26,14 @@ function errorImage(message: string) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#111827",
-          color: "white",
+          background: bg,
+          color: fg,
           padding: 40,
           fontSize: 36,
           textAlign: "center",
         }}
       >
-        {message}
+        {text}
       </div>
     ),
     {
@@ -63,23 +45,37 @@ function errorImage(message: string) {
 }
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
-  const url = new URL(req.url);
-  const debug = url.searchParams.get("debug");
-
-  const data = await getShare(params.id);
-  if (!data) {
-    const msg = `Shared grade not found: ${params.id}`;
-    return errorImage(debug ? msg : "Shared grade not found");
-  }
-
-  const asOf = new Date(data.as_of_date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  const title = `My 401(k) Grade: ${data.grade} / 5`;
-
   try {
+    const url = new URL(req.url);
+    const debug = url.searchParams.get("debug") === "1";
+
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) {
+      return png(debug ? "Missing DATABASE_URL (Edge env)" : "Image render error");
+    }
+
+    // Initialize Neon inside handler so failures are caught
+    const sql = neon(dbUrl);
+
+    // Fetch redacted share row
+    const rows = await sql<ShareRow[]>
+      `SELECT provider, profile, grade, model_name, sentiment, as_of_date
+         FROM public.report_shares
+        WHERE id = ${params.id}
+        LIMIT 1`;
+
+    const data = rows[0];
+    if (!data) {
+      return png(debug ? `Shared grade not found: ${params.id}` : "Shared grade not found");
+    }
+
+    const asOf = new Date(data.as_of_date).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    const title = `My 401(k) Grade: ${data.grade} / 5`;
+
     return new ImageResponse(
       (
         <div
@@ -93,6 +89,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
             padding: 48,
             fontSize: 36,
             justifyContent: "space-between",
+            position: "relative",
           }}
         >
           {/* Header */}
@@ -166,7 +163,15 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           </div>
 
           {debug && (
-            <div style={{ position: "absolute", right: 24, bottom: 24, fontSize: 18, color: "#9CA3AF" }}>
+            <div
+              style={{
+                position: "absolute",
+                right: 24,
+                bottom: 24,
+                fontSize: 18,
+                color: "#9CA3AF",
+              }}
+            >
               id={params.id}
             </div>
           )}
@@ -175,11 +180,14 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       {
         width: 1200,
         height: 630,
-        headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600, s-maxage=3600" },
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=3600, s-maxage=3600",
+        },
       }
     );
   } catch (err) {
-    console.error("[OG] render error:", err);
-    return errorImage(debug ? `Render error: ${(err as Error).message}` : "Image render error");
+    console.error("[OG] top-level error:", err);
+    return png("Image render error");
   }
 }
