@@ -19,18 +19,17 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
       url,
       siteName: "GradeYour401k",
       type: "article",
-      images: [{ url: image, width: 1200, height: 1200, type: "image/png", alt: "Shared 401(k) Grade" }],
+      images: [{ url: image, width: 300, height: 300, type: "image/png", alt: "Shared 401(k) Grade" }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Shared 401(k) Grade",
       description: "See this 401(k) grade and get your own in minutes.",
-      images: [image], // now 1200x1200
+      images: [image], // now 300x300
     },
     alternates: { canonical: url },
   };
 }
-
 
 import Link from "next/link";
 import Image from "next/image";
