@@ -15,19 +15,20 @@ export async function generateMetadata({ params }: { params: { id: string } }): 
     openGraph: {
       title: "Shared 401(k) Grade",
       description: "See this 401(k) grade and get your own in minutes.",
-      images: [{ url: image }],
       url,
       siteName: "GradeYour401k",
       type: "article",
+      images: [{ url: image, width: 1200, height: 630 }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Shared 401(k) Grade",
       description: "See this 401(k) grade and get your own in minutes.",
-      images: [image],
+      images: [image], // 1200x630
     },
   };
 }
+
 
 import Link from "next/link";
 import Image from "next/image";
