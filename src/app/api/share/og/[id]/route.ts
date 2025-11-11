@@ -1,31 +1,24 @@
 /* @vercel/og image for shared grades */
 import { ImageResponse } from "next/og";
-import { Pool } from "pg";
+import { neon } from "@neondatabase/serverless";
 
-export const runtime = "edge"; // fast + works well with @vercel/og
+export const runtime = "edge"; // ✅ stays Edge-compatible
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+const sql = neon(process.env.DATABASE_URL!);
 
-// Helper: fetch redacted share
+// Helper: fetch redacted share (Edge-safe)
 async function getShare(id: string) {
-  const { rows } = await pool.query(
-    `SELECT provider, profile, grade, model_name, sentiment, as_of_date
-     FROM public.report_shares WHERE id = $1`,
-    [id]
-  );
-  return rows[0] || null;
+  const rows = await sql<
+    { provider: string; profile: string; grade: string; model_name: string | null; sentiment: string | null; as_of_date: string }
+  >`SELECT provider, profile, grade, model_name, sentiment, as_of_date
+     FROM public.report_shares WHERE id = ${id} LIMIT 1`;
+  return rows[0] ?? null;
 }
 
 export async function GET(_: Request, { params }: { params: { id: string } }) {
   const data = await getShare(params.id);
-  if (!data) {
-    return new Response("Not found", { status: 404 });
-  }
+  if (!data) return new Response("Not found", { status: 404 });
 
-  // Basic theming
   const asOf = new Date(data.as_of_date).toLocaleDateString();
   const title = `My 401(k) Grade: ${data.grade} / 5`;
 
@@ -46,7 +39,6 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
       >
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {/* Optional: replace with your static logo path */}
           <div
             style={{
               width: 64,
