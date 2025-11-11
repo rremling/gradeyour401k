@@ -144,6 +144,79 @@ export default function ResultsClient() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
 
+  // ─── NEW: share state ──────────────────────────────────────────────────────
+  const [shareUrl, setShareUrl] = useState<string>("");
+  const [shareWorking, setShareWorking] = useState<boolean>(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<boolean>(false);
+
+  async function handleMakeShareLink() {
+    try {
+      setShareError(null);
+      if (!preview) return;
+      const provider = (preview.provider_display || preview.provider || "").toString();
+      const profile = (preview.profile || "").toString();
+      const gradeNumber =
+        Number(preview.grade_adjusted) ||
+        Number(preview.grade_base) ||
+        0;
+
+      if (!provider || !profile || !Number.isFinite(gradeNumber) || gradeNumber <= 0) {
+        setShareError("Grade not ready to share.");
+        return;
+      }
+
+      setShareWorking(true);
+
+      const res = await fetch("/api/share/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Only redacted fields — no PII
+        body: JSON.stringify({
+          provider,
+          profile,
+          grade: (Math.round(gradeNumber * 10) / 10).toFixed(1), // e.g., "4.3"
+          as_of_date: new Date().toISOString().slice(0, 10),     // YYYY-MM-DD
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data?.id) {
+        throw new Error(data?.error || "Failed to create share link");
+      }
+
+      const url = `${window.location.origin}/share/${data.id}`;
+      setShareUrl(url);
+
+      // Try to invoke native share right away; if not supported, UI shows buttons.
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: "My 401(k) Grade",
+            text: "Just got my 401(k) graded on GradeYour401k!",
+            url,
+          });
+        } catch {
+          // user canceled -> just leave the buttons visible
+        }
+      }
+    } catch (e: any) {
+      setShareError(e?.message || "Could not create share link.");
+    } finally {
+      setShareWorking(false);
+    }
+  }
+
+  function copyLink() {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     let alive = true;
     async function run() {
@@ -160,7 +233,7 @@ export default function ResultsClient() {
         const data = (await res.json()) as Preview;
         if (!alive) return;
         if (!res.ok || !data?.ok) {
-          setError(data as any as string || "Failed to load preview");
+          setError((data as any as string) || "Failed to load preview");
           setPreview(null);
         } else {
           setPreview(data);
@@ -212,6 +285,12 @@ export default function ResultsClient() {
   const grade = gradeNum ? gradeNum.toFixed(1) : "—";
   const total = holdings.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
 
+  // Helper for social links once shareUrl exists
+  const enc = (s: string) => encodeURIComponent(s);
+  const xUrl  = shareUrl ? `https://twitter.com/intent/tweet?text=${enc("Just got my 401(k) graded on GradeYour401k!")}&url=${enc(shareUrl)}` : "";
+  const liUrl = shareUrl ? `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}` : "";
+  const fbUrl = shareUrl ? `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}` : "";
+
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
       <Stepper current={2} />
@@ -256,6 +335,60 @@ export default function ResultsClient() {
                 <div className="text-xs text-gray-600 mt-1">{total.toFixed(1)}% (target 100%)</div>
               </div>
             </div>
+
+            {/* ─── NEW: Share controls (PII-safe) ─────────────────────────── */}
+            <div className="mt-4 border-t pt-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <button
+                  onClick={handleMakeShareLink}
+                  disabled={shareWorking}
+                  className="inline-flex items-center justify-center rounded-lg bg-blue-600 text-white px-4 py-2.5 hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {shareWorking ? "Preparing share link…" : "Share your grade"}
+                </button>
+
+                {shareError && (
+                  <span className="text-sm text-red-600">{shareError}</span>
+                )}
+
+                {shareUrl && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => {
+                        if (navigator.share) {
+                          navigator.share({
+                            title: "My 401(k) Grade",
+                            text: "Just got my 401(k) graded on GradeYour401k!",
+                            url: shareUrl,
+                          }).catch(() => {});
+                        } else {
+                          copyLink();
+                        }
+                      }}
+                      className="rounded-lg border px-3 py-2 hover:bg-gray-50"
+                    >
+                      System Share
+                    </button>
+                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={xUrl} target="_blank" rel="noopener noreferrer">
+                      Post on X
+                    </a>
+                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={liUrl} target="_blank" rel="noopener noreferrer">
+                      Share on LinkedIn
+                    </a>
+                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={fbUrl} target="_blank" rel="noopener noreferrer">
+                      Share on Facebook
+                    </a>
+                    <button onClick={copyLink} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
+                      {copied ? "Copied!" : "Copy link"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {shareUrl && (
+                <p className="text-xs text-gray-500 mt-1 break-all">{shareUrl}</p>
+              )}
+            </div>
+            {/* ─────────────────────────────────────────────────────────────── */}
           </section>
 
           {/* Holdings list */}
