@@ -14,57 +14,89 @@ type ShareRow = {
   as_of_date: string;
 };
 
-function png(text: string, bg = "#111827", fg = "white") {
+function png(text: string, bg = "#0B1220", fg = "white") {
   return new ImageResponse(
     (
       <div
         style={{
-          width: 1200,
-          height: 1200,
+          width: 300,
+          height: 300,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           background: bg,
           color: fg,
-          padding: 40,
-          fontSize: 36,
+          padding: 16,
+          fontSize: 16,
           textAlign: "center",
         }}
       >
         <div style={{ display: "flex" }}>{text}</div>
       </div>
     ),
-    {
-      width: 1200,
-      height: 1200,
-      headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
-    }
+    { width: 300, height: 300, headers: { "Content-Type": "image/png", "Cache-Control": "no-store" } }
+  );
+}
+
+// Simple SVG star component for @vercel/og
+function Star({ fill = "#d1d5db" }: { fill?: string }) {
+  // 5-point star path (viewBox 24x24)
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24">
+      <path
+        d="M12 2.5l2.95 5.98 6.6.96-4.78 4.66 1.13 6.59L12 17.98 6.1 20.69l1.13-6.59L2.44 9.44l6.6-.96L12 2.5z"
+        fill={fill}
+      />
+    </svg>
+  );
+}
+
+// Half-filled star using clipPath
+function HalfStar() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24">
+      <defs>
+        <clipPath id="halfClip">
+          <rect x="0" y="0" width="12" height="24" />
+        </clipPath>
+      </defs>
+      <path
+        d="M12 2.5l2.95 5.98 6.6.96-4.78 4.66 1.13 6.59L12 17.98 6.1 20.69l1.13-6.59L2.44 9.44l6.6-.96L12 2.5z"
+        fill="#d1d5db"
+      />
+      <path
+        d="M12 2.5l2.95 5.98 6.6.96-4.78 4.66 1.13 6.59L12 17.98 6.1 20.69l1.13-6.59L2.44 9.44l6.6-.96L12 2.5z"
+        fill="#facc15"
+        clipPath="url(#halfClip)"
+      />
+    </svg>
   );
 }
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
-    const url = new URL(req.url);
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `${url.protocol}//${url.host}`;
+    const reqUrl = new URL(req.url);
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || `${reqUrl.protocol}//${reqUrl.host}`;
     const logoUrl = `${baseUrl}/logo.png`;
 
     const dbUrl = process.env.DATABASE_URL;
-    if (!dbUrl) return png("Image render error (missing DATABASE_URL)");
+    if (!dbUrl) return png("Image render error");
 
     const sql = neon(dbUrl);
-
     const rows = await sql<ShareRow[]>
       `SELECT provider, profile, grade, model_name, sentiment, as_of_date
          FROM public.report_shares
         WHERE id = ${params.id}
         LIMIT 1`;
-
     const data = rows[0];
     if (!data) return png("Shared grade not found");
 
     const gradeNum = Number(data.grade);
-    const rating = Number.isFinite(gradeNum) ? Math.max(0, Math.min(5, gradeNum)) : 0;
-    const ratingPct = `${(rating / 5) * 100}%`;
+    const ratingRaw = Number.isFinite(gradeNum) ? Math.max(0, Math.min(5, gradeNum)) : 0;
+    // Round to nearest 0.5 for star display
+    const rating = Math.round(ratingRaw * 2) / 2;
+    const full = Math.floor(rating);
+    const hasHalf = rating - full >= 0.5;
 
     const asOf = new Date(data.as_of_date).toLocaleDateString("en-US", {
       month: "short", day: "numeric", year: "numeric",
@@ -74,126 +106,100 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       (
         <div
           style={{
-            width: 1200,
-            height: 1200,
+            width: 300,
+            height: 300,
             display: "flex",
             flexDirection: "column",
-            background: "#0B1220",       // deep navy
+            background: "#0B1220",
             color: "white",
-            padding: 64,
-            gap: 36,
-            position: "relative",
+            padding: 16,
             boxSizing: "border-box",
+            gap: 10,
             justifyContent: "flex-start",
           }}
         >
           {/* Header: logo + brand */}
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <img
-              src={logoUrl}
-              width={64}
-              height={64}
-              style={{ display: "flex", borderRadius: 12 }}
-              alt=""
-            />
-            <div style={{ display: "flex", fontWeight: 700, fontSize: 36 }}>GradeYour401k</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <img src={logoUrl} width={20} height={20} style={{ display: "flex", borderRadius: 4 }} alt="" />
+            <div style={{ display: "flex", fontWeight: 700, fontSize: 14 }}>GradeYour401k</div>
           </div>
 
-          {/* Big Title: 4.5 / 5 + star bar */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "flex", fontSize: 88, fontWeight: 800 }}>
-              {rating.toFixed(1)} / 5
-            </div>
-            {/* Stars (gold overlay technique) */}
-            <div style={{ display: "flex", position: "relative", height: 64 }}>
-              <div
-                style={{
-                  display: "flex",
-                  fontSize: 64,
-                  color: "#d1d5db",          // gray-300
-                  letterSpacing: 6,
-                }}
-              >
-                ★★★★★
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  position: "absolute",
-                  left: 0,
-                  top: 0,
-                  height: "100%",
-                  overflow: "hidden",
-                  width: ratingPct,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    fontSize: 64,
-                    color: "#facc15",        // yellow-400
-                    letterSpacing: 6,
-                  }}
-                >
-                  ★★★★★
-                </div>
-              </div>
-            </div>
+          {/* Headline */}
+          <div
+            style={{
+              display: "flex",
+              fontSize: 14,
+              lineHeight: 1.2,
+              color: "#e5e7eb",
+              fontWeight: 500,
+            }}
+          >
+            I graded my 401(k) today — here’s my grade:
           </div>
 
-          {/* Info card */}
+          {/* Big Grade */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <div style={{ display: "flex", fontSize: 44, fontWeight: 800 }}>{ratingRaw.toFixed(1)}</div>
+            <div style={{ display: "flex", fontSize: 20, fontWeight: 700, color: "#a3a3a3" }}>/ 5</div>
+          </div>
+
+          {/* Stars */}
+          <div style={{ display: "flex", gap: 4 }}>
+            {Array.from({ length: full }).map((_, i) => (
+              <Star key={`full-${i}`} fill="#facc15" />
+            ))}
+            {hasHalf && <HalfStar key="half" />}
+            {Array.from({ length: 5 - full - (hasHalf ? 1 : 0) }).map((_, i) => (
+              <Star key={`empty-${i}`} fill="#d1d5db" />
+            ))}
+          </div>
+
+          {/* White card with context */}
           <div
             style={{
               display: "flex",
               flexDirection: "column",
               background: "white",
               color: "#111827",
-              borderRadius: 32,
-              padding: 40,
-              gap: 22,
-              boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+              borderRadius: 10,
+              padding: 10,
+              gap: 6,
+              marginTop: 6,
             }}
           >
-            <div style={{ display: "flex", fontSize: 24, color: "#4B5563" }}>Provider</div>
-            <div style={{ display: "flex", fontSize: 44, fontWeight: 700 }}>{data.provider}</div>
+            <div style={{ display: "flex", fontSize: 10, color: "#4B5563" }}>Provider</div>
+            <div style={{ display: "flex", fontSize: 14, fontWeight: 700 }}>{data.provider}</div>
 
-            <div style={{ display: "flex", gap: 48, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 280 }}>
-                <div style={{ display: "flex", fontSize: 22, color: "#4B5563" }}>Profile</div>
-                <div style={{ display: "flex", fontSize: 40, fontWeight: 600 }}>{data.profile}</div>
+            <div style={{ display: "flex", gap: 16 }}>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", fontSize: 10, color: "#4B5563" }}>Profile</div>
+                <div style={{ display: "flex", fontSize: 12, fontWeight: 600 }}>{data.profile}</div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 280 }}>
-                <div style={{ display: "flex", fontSize: 22, color: "#4B5563" }}>As of</div>
-                <div style={{ display: "flex", fontSize: 36, fontWeight: 600 }}>{asOf}</div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <div style={{ display: "flex", fontSize: 10, color: "#4B5563" }}>As of</div>
+                <div style={{ display: "flex", fontSize: 12, fontWeight: 600 }}>{asOf}</div>
               </div>
-              {data.sentiment && (
-                <div style={{ display: "flex", flexDirection: "column", minWidth: 280 }}>
-                  <div style={{ display: "flex", fontSize: 22, color: "#4B5563" }}>Market Sentiment</div>
-                  <div style={{ display: "flex", fontSize: 36, fontWeight: 600 }}>{data.sentiment}</div>
-                </div>
-              )}
             </div>
           </div>
 
-          {/* Footer CTA (single line, no redundant bottom-right text) */}
+          {/* Footer CTA */}
           <div
             style={{
               display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
               marginTop: "auto",
-              fontSize: 26,
+              fontSize: 11,
               color: "#9CA3AF",
+              justifyContent: "space-between",
+              width: "100%",
             }}
           >
             <div style={{ display: "flex" }}>Get your own grade → GradeYour401k.com</div>
-            {/* intentionally nothing else on the right */}
           </div>
         </div>
       ),
       {
-        width: 1200,
-        height: 1200,
+        width: 300,
+        height: 300,
         headers: {
           "Content-Type": "image/png",
           "Cache-Control": "public, max-age=3600, s-maxage=3600",
