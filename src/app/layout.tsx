@@ -4,6 +4,7 @@ import Nav from "./components/Nav";
 import { Analytics } from "@vercel/analytics/react"; // ✅ add this
 
 export const metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL || "https://gradeyour401k.com"),
   title: "GradeYour401k",
   description: "Get your 401k graded and optimized",
 };
