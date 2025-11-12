@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FUND_LABELS, labelFor } from "@/lib/funds";
-import { computeFinalGrade, formatGradeHalfStar } from "@/lib/grade";
+import { computeFinalGrade, formatGradeHalfStar, MAX_GRADE } from "@/lib/grade";
 
 type Holding = { symbol: string; weight: number };
 type Preview = {
@@ -157,12 +157,15 @@ export default function ResultsClient() {
       if (!preview) return;
       const provider = (preview.provider_display || preview.provider || "").toString();
       const profile = (preview.profile || "").toString();
-      const gradeNumber =
+
+      // Use adjusted/base if present, otherwise compute; cap & half-step
+      const gradeNumberRaw =
         Number(preview.grade_adjusted) ||
         Number(preview.grade_base) ||
-        0;
+        computeFinalGrade(String(preview.profile || ""), holdings);
+      const gradeHalfStr = formatGradeHalfStar(Math.min(MAX_GRADE, gradeNumberRaw));
 
-      if (!provider || !profile || !Number.isFinite(gradeNumber) || gradeNumber <= 0) {
+      if (!provider || !profile || gradeHalfStr === "—") {
         setShareError("Grade not ready to share.");
         return;
       }
@@ -175,7 +178,7 @@ export default function ResultsClient() {
         body: JSON.stringify({
           provider,
           profile,
-          grade: (Math.round(gradeNumber * 10) / 10).toFixed(1),
+          grade: gradeHalfStr, // send the capped, half-step string (e.g., "4.3")
           as_of_date: new Date().toISOString().slice(0, 10),
         }),
       });
@@ -257,7 +260,7 @@ export default function ResultsClient() {
     [preview]
   );
 
-  const profile = preview?.profile || "—";
+  const profile = useMemo(() => preview?.profile || "—", [preview]);
 
   // Normalize holdings array defensively
   const holdings: Holding[] = useMemo(() => {
@@ -272,13 +275,16 @@ export default function ResultsClient() {
       .filter((r) => r.symbol && Number.isFinite(r.weight));
   }, [preview]);
 
-  const gradeNum = useMemo(() => {
+  // Compute -> cap -> format
+  const gradeNumRaw = useMemo(() => {
     const ga = Number(preview?.grade_adjusted);
     const gb = Number(preview?.grade_base);
     if (Number.isFinite(ga)) return ga;
     if (Number.isFinite(gb)) return gb;
     return computeFinalGrade(profile, holdings);
   }, [preview, holdings, profile]);
+
+  const gradeNum = Math.min(MAX_GRADE, Number(gradeNumRaw) || 0);
 
   const grade = useMemo(
     () => (Number.isFinite(gradeNum) ? formatGradeHalfStar(gradeNum) : "—"),
