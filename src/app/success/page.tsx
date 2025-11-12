@@ -48,52 +48,50 @@ function Stepper({ current = 4 }: { current?: 1 | 2 | 3 | 4 }) {
         })}
       </ol>
 
-      {/* Full labels with horizontal scroll on larger screens */}
+           {/* Full labels (no horizontal scroll on sm+) */}
       <div className="hidden sm:block">
-        <div className="-mx-3 overflow-x-auto overscroll-x-contain">
-          <ol className="flex items-center gap-3 flex-nowrap px-3">
-            {steps.map((s, idx) => {
-              const isActive = s.n === current;
-              const isComplete = s.n < current;
-              return (
-                <li key={s.n} className="flex items-center gap-3 shrink-0">
+        <ol className="flex items-center gap-3 flex-nowrap px-3">
+          {steps.map((s, idx) => {
+            const isActive = s.n === current;
+            const isComplete = s.n < current;
+            return (
+              <li key={s.n} className="flex items-center gap-3 shrink-0">
+                <div
+                  className={[
+                    "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
+                    isActive
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : isComplete
+                      ? "border-blue-600 text-blue-600"
+                      : "border-gray-300 text-gray-600",
+                  ].join(" ")}
+                >
+                  {s.n}
+                </div>
+                <span
+                  className={[
+                    "whitespace-nowrap",
+                    isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                  ].join(" ")}
+                >
+                  {s.label}
+                </span>
+                {idx < steps.length - 1 && (
                   <div
                     className={[
-                      "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
-                      isActive
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : isComplete
-                        ? "border-blue-600 text-blue-600"
-                        : "border-gray-300 text-gray-600",
+                      "mx-2 h-px w-10 md:w-16",
+                      isComplete ? "bg-blue-600" : "bg-gray-300",
                     ].join(" ")}
-                  >
-                    {s.n}
-                  </div>
-                  <span
-                    className={[
-                      "whitespace-nowrap",
-                      isActive ? "font-semibold text-blue-700" : "text-gray-700",
-                    ].join(" ")}
-                  >
-                    {s.label}
-                  </span>
-                  {idx < steps.length - 1 && (
-                    <div
-                      className={[
-                        "mx-2 h-px w-10 md:w-16",
-                        isComplete ? "bg-blue-600" : "bg-gray-300",
-                      ].join(" ")}
-                    />
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        </div>
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ol>
       </div>
-    </div>
-  );
-}
+    </div>  
+  );      
+}         
 
 export default function SuccessPage() {
   return (
