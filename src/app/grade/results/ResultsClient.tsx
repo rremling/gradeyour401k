@@ -102,8 +102,9 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
       );
     })}
   </ol>
-</div>
-
+    </div>
+  );
+}
 
 function Stars({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(100, (value / 5) * 100));
