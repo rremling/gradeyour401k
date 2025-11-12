@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FUND_LABELS, labelFor } from "@/lib/funds";
 
 type Holding = { symbol: string; weight: number };
@@ -107,21 +107,69 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
     </div>
   );
 }
+function isBondSymbol(sym: string): boolean {
+  const lbl = (labelFor(sym) || "").toLowerCase();
+  return /bond|treasury|fixed income|aggregate|corporate|muni|municipal|income|tips/.test(lbl);
+}
+
+function fundFamily(sym: string): string {
+  const lbl = (labelFor(sym) || "").trim();
+  if (!lbl) return "";
+  return lbl.split(/\s+/)[0] || "";
+}
 
 function computePrelimGrade(profile: string, rows: Holding[]): number {
   const weights = rows.map((r) => (Number.isFinite(r.weight) ? r.weight : 0));
   const total = weights.reduce((s, n) => s + n, 0);
 
   let base =
-    profile === "Aggressive Growth" ? 4.5 :
-    profile === "Balanced" ? 3.8 :
-    4.1;
+  (profile === "Growth" || profile === "Aggressive Growth") ? 4.5 :
+  profile === "Balanced" ? 3.8 :
+  4.1;
+
 
   const off = Math.abs(100 - total);
-  if (off > 0.25) base -= Math.min(1, off / 100);
+  if (off > 0.25) base -= Math.min(0.8, off / 100);
+
   if (Math.max(0, ...weights) > 60) base -= 0.2;
 
-  return Math.max(1, Math.min(5, Math.round(base * 2) / 2));
+  const n = rows.length;
+  if (n >= 6 && n <= 8) {
+    base += 0.35;
+  } else {
+    const dist = Math.min(Math.abs(n - 7), 10);
+    base -= dist * 0.05;
+  }
+
+  const curatedCount = rows.filter((r) => !!FUND_LABELS[(r.symbol || "").toUpperCase()]).length;
+  if (n > 0) {
+    const curatedRatio = curatedCount / n;
+    base += (curatedRatio - 0.6) * 0.5;
+  }
+
+  const familyWeights: Record<string, number> = {};
+  rows.forEach((r) => {
+    const fam = fundFamily(r.symbol);
+    familyWeights[fam] = (familyWeights[fam] || 0) + (Number(r.weight) || 0);
+  });
+  const topFamily = Object.entries(familyWeights).sort((a, b) => b[1] - a[1])[0];
+  const topFamilyPct = topFamily ? topFamily[1] : 0;
+
+  if (topFamilyPct >= 55 && topFamilyPct <= 85) base += 0.25;
+  else if (topFamilyPct > 90) base -= 0.1;
+
+  const bondPct = rows.reduce((s, r) => s + (isBondSymbol(r.symbol) ? (Number(r.weight) || 0) : 0), 0);
+  const bondThresh =
+  (profile === "Growth" || profile === "Aggressive Growth") ? 20 :
+  profile === "Balanced" ? 35 :
+  50;
+  if (bondPct > bondThresh) {
+    const overshoot = bondPct - bondThresh;
+    base -= Math.min(0.9, overshoot * 0.03);
+  }
+
+  const clamped = Math.max(1, Math.min(5, base));
+  return Math.round(clamped * 2) / 2;
 }
 
 function Stars({ value }: { value: number }) {
@@ -139,6 +187,24 @@ function Stars({ value }: { value: number }) {
 export default function ResultsClient() {
   const sp = useSearchParams();
   const previewId = (sp.get("previewId") || "").trim();
+  const router = useRouter();
+
+useEffect(() => {
+  // Refresh if page was restored from back/forward cache
+  const onPageShow = (e: any) => {
+    if (e?.persisted) router.refresh();
+  };
+
+  // Also handle Chrome's Navigation Timing for back/forward
+ const navEntries = performance.getEntriesByType("navigation");
+const nav = (navEntries && navEntries[0]) as any;
+if (nav && nav.type === "back_forward") {
+  router.refresh();
+}
+
+  window.addEventListener("pageshow", onPageShow);
+  return () => window.removeEventListener("pageshow", onPageShow);
+}, [router]);
 
   const [loading, setLoading] = useState<boolean>(!!previewId);
   const [error, setError] = useState<string | null>(null);
