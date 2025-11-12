@@ -326,6 +326,10 @@ export default function ResultsClient() {
                   Provider: <span className="font-medium">{providerDisplay}</span> · Profile:{" "}
                   <span className="font-medium">{profile}</span>
                 </p>
+                <p className="text-sm text-gray-700 mt-1">
+                The grade summarizes how effectively your 401(k) holdings achieve diversification,<br />
+                stay aligned with your profile, and make efficient use of your provider’s investment options.
+            </p>
               </div>
               <div className="text-right hidden sm:block">
                 <div className="text-xs text-gray-600 mb-1">Total allocation</div>
