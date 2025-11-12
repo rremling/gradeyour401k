@@ -82,20 +82,32 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     if (!dbUrl) return png("Image render error");
 
     const sql = neon(dbUrl);
-    const rows = await sql<ShareRow[]>
-      `SELECT provider, profile, grade, model_name, sentiment, as_of_date
-         FROM public.report_shares
-        WHERE id = ${params.id}
-        LIMIT 1`;
+    const rows = await sql<ShareRow[]>`
+      SELECT provider, profile, grade, model_name, sentiment, as_of_date
+      FROM public.report_shares
+      WHERE id = ${params.id}
+      LIMIT 1
+    `;
 
     const data = rows[0];
     if (!data) return png("Shared grade not found");
 
-    const gradeNum = Number(data.grade);
-    const ratingRaw = Number.isFinite(gradeNum) ? Math.max(0, Math.min(5, gradeNum)) : 0;
-    const rating = Math.round(ratingRaw * 2) / 2; // nearest 0.5
-    const full = Math.floor(rating);
-    const hasHalf = rating - full >= 0.5;
+    // ── Grade: use the exact saved half-star string; fallback only if malformed
+    const gradeStr = typeof data.grade === "string" ? data.grade : String(data.grade ?? "");
+    const displayGrade =
+      /^[1-5](?:\.0|\.5)$/.test(gradeStr)
+        ? gradeStr
+        : (() => {
+            const n = Number(gradeStr);
+            if (!Number.isFinite(n)) return "—";
+            const half = Math.round(Math.min(5, Math.max(1, n)) * 2) / 2;
+            return half.toFixed(1);
+          })();
+
+    // Stars derived from the already half-step value
+    const gradeNum = Number(displayGrade);
+    const full = Number.isFinite(gradeNum) ? Math.floor(gradeNum) : 0;
+    const hasHalf = Number.isFinite(gradeNum) ? gradeNum - full === 0.5 : false;
 
     const asOf = new Date(data.as_of_date).toLocaleDateString("en-US", {
       month: "short",
@@ -146,7 +158,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
           {/* Big Grade (equal sizes) */}
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <div style={{ fontSize: 72, fontWeight: 900 }}>{ratingRaw.toFixed(1)}</div>
+            <div style={{ fontSize: 72, fontWeight: 900 }}>{displayGrade}</div>
             <div style={{ fontSize: 72, fontWeight: 700, color: "#a3a3a3" }}>/ 5</div>
           </div>
 
@@ -189,8 +201,12 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
               </div>
               {data.sentiment && (
                 <div style={{ display: "flex", flexDirection: "column", minWidth: 200 }}>
-                  <div style={{ fontSize: 14, color: "#4B5563", display: "flex" }}>Market Sentiment</div>
-                  <div style={{ fontSize: 22, fontWeight: 700, display: "flex" }}>{data.sentiment}</div>
+                  <div style={{ fontSize: 14, color: "#4B5563", display: "flex" }}>
+                    Market Sentiment
+                  </div>
+                  <div style={{ fontSize: 22, fontWeight: 700, display: "flex" }}>
+                    {data.sentiment}
+                  </div>
                 </div>
               )}
             </div>
