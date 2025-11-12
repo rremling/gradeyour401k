@@ -1,11 +1,12 @@
 // src/lib/pdf.ts
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { FUND_LABELS } from "@/lib/funds";
+import { computeFinalGrade, formatGradeHalfStar } from "@/lib/grade";
 
 export type PdfArgs = {
   provider: string;
   profile: string;
-  grade: number | string | null;
+  grade: number | string | null; // authoritative if provided (stored half-step string like "4.5" preferred)
   holdings: Array<{ symbol: string; weight: number }>;
   logoUrl?: string; // GradeYour401k logo (PNG recommended)
   bullUrl?: string; // Kenai bull logo (PNG recommended)
@@ -21,11 +22,6 @@ export type PdfArgs = {
 /* ───────── helpers ───────── */
 function titleCase(s: string) {
   return (s || "").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-function toGradeText(g: number | string | null) {
-  if (g == null) return "-";
-  const n = Number(g);
-  return Number.isFinite(n) ? `${n.toFixed(1)} / 5` : String(g);
 }
 const descFor = (sym: string) => FUND_LABELS[(sym || "").toUpperCase().trim()];
 
@@ -175,12 +171,29 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
   const metaLeft = `Provider: ${titleCase(provider)} - Profile: ${titleCase(profile)}`;
   writeLine(metaLeft, 11.5, rgb(0.25, 0.25, 0.25));
 
+  // ───────── Grade (consistent half-star formatting) ─────────
+  // Prefer the passed-in grade; if missing, compute the final grade from profile+holdings.
+  const rawGradeNum = (() => {
+    if (grade !== null && grade !== undefined && `${grade}`.trim() !== "") {
+      const n = Number(grade);
+      if (Number.isFinite(n)) return n;
+    }
+    const fallback = computeFinalGrade(profile, holdings);
+    return Number.isFinite(fallback) ? fallback : NaN;
+  })();
+
+  const displayGrade = Number.isFinite(rawGradeNum)
+    ? formatGradeHalfStar(rawGradeNum) // e.g., "4.5"
+    : "—";
+
   // Grade (right) with vector star (draw at same y band used above)
-  const gradeTxt = `Grade: ${toGradeText(grade)}`;
+  const gradeTxt = `Grade: ${displayGrade} / 5`;
   const gradeSize = 11.5;
-  const gradeWidth = font.widthOfTextAtSize(gradeTxt, gradeSize) + 8 + 14; // 14px star
-  const gx = PAGE_W - MARGIN - gradeWidth;
   const starOuterRadiusPx = 7;
+  const gradeTextWidth = font.widthOfTextAtSize(gradeTxt, gradeSize);
+  const totalGradeBlockW = 8 + starOuterRadiusPx * 2 + gradeTextWidth; // star + spacing + text
+  const gx = PAGE_W - MARGIN - totalGradeBlockW;
+
   page.drawText(gradeTxt, {
     x: gx + 8 + starOuterRadiusPx * 2,
     y: y + 26, // align with meta line’s previous y band
@@ -249,8 +262,6 @@ export async function generatePdfBuffer(args: PdfArgs): Promise<Uint8Array> {
     let headerOnThisPage = true;
 
     rows.forEach((r, i) => {
-      // If first row or after a page break, we already drew the header
-      // Check if the next row fits; if not, footer+new page+header again
       if (y - rowH <= BOTTOM) {
         drawFooter(page);
         page = doc.addPage([PAGE_W, PAGE_H]);
