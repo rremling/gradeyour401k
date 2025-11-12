@@ -64,8 +64,9 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
 
       {/* Full labels with horizontal scroll if needed */}
       <div className="hidden sm:block">
-        <div className="-mx-3 overflow-x-auto overscroll-x-contain">
-          <ol className="flex items-center gap-3 flex-nowrap px-3">
+        <div className="overflow-x-auto overscroll-x-contain">
+  <ol className="flex items-center gap-3 flex-nowrap px-3 min-w-max">
+
             {steps.map((s, idx) => {
               const isActive = s.n === current;
               const isComplete = s.n < current;
