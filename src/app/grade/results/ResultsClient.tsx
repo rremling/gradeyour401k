@@ -327,8 +327,7 @@ export default function ResultsClient() {
                   <span className="font-medium">{profile}</span>
                 </p>
                 <p className="text-sm text-gray-700 mt-1">
-                The grade summarizes how effectively your 401(k) holdings achieve diversification,<br />
-                stay aligned with your profile, and make efficient use of your provider’s investment options.
+                The grade summarizes how effectively your 401(k) holdings achieve diversification stay aligned with your profile, and make efficient use of your provider’s investment options.
             </p>
               </div>
               <div className="text-right hidden sm:block">
