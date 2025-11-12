@@ -151,74 +151,7 @@ export default function ResultsClient() {
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
-  async function handleMakeShareLink() {
-    try {
-      setShareError(null);
-      if (!preview) return;
-      const provider = (preview.provider_display || preview.provider || "").toString();
-      const profile = (preview.profile || "").toString();
-
-      // Use adjusted/base if present, otherwise compute; cap & half-step
-      const gradeNumberRaw =
-        Number(preview.grade_adjusted) ||
-        Number(preview.grade_base) ||
-        computeFinalGrade(String(preview.profile || ""), holdings);
-      const gradeHalfStr = formatGradeHalfStar(Math.min(MAX_GRADE, gradeNumberRaw));
-
-      if (!provider || !profile || gradeHalfStr === "—") {
-        setShareError("Grade not ready to share.");
-        return;
-      }
-
-      setShareWorking(true);
-
-      const res = await fetch("/api/share/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          profile,
-          grade: gradeHalfStr, // send the capped, half-step string (e.g., "4.3")
-          as_of_date: new Date().toISOString().slice(0, 10),
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data?.id) {
-        throw new Error(data?.error || "Failed to create share link");
-      }
-
-      const url = `${window.location.origin}/share/${data.id}`;
-      setShareUrl(url);
-      setShareId(data.id);
-    } catch (e: any) {
-      setShareError(e?.message || "Could not create share link.");
-    } finally {
-      setShareWorking(false);
-    }
-  }
-
-  function copyLink() {
-    if (!shareUrl) return;
-    navigator.clipboard.writeText(shareUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }
-
-  async function handleDownloadImage() {
-    if (!shareId) return;
-    const res = await fetch(`/api/share/og/${encodeURIComponent(shareId)}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "my-401k-grade.png";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  // ───────────────────────────────────────────────────────────────────────────
+  // ── Load preview
   useEffect(() => {
     let alive = true;
     async function run() {
@@ -275,7 +208,7 @@ export default function ResultsClient() {
       .filter((r) => r.symbol && Number.isFinite(r.weight));
   }, [preview]);
 
-  // Compute -> cap -> format
+  // ── Compute → curve down → cap → half-step string
   const gradeNumRaw = useMemo(() => {
     const ga = Number(preview?.grade_adjusted);
     const gb = Number(preview?.grade_base);
@@ -284,8 +217,13 @@ export default function ResultsClient() {
     return computeFinalGrade(profile, holdings);
   }, [preview, holdings, profile]);
 
-  const gradeNum = Math.min(MAX_GRADE, Number(gradeNumRaw) || 0);
+  // Downshift + compress toward 1.0 to avoid everything clustering near 4.5
+  // adjusted = 1 + ( (raw + bias) - 1 ) * scale
+  const bias = -0.35;   // subtract ~0.35 stars overall
+  const scale = 0.90;   // compress spread by 10%
+  const curved = 1 + ((Number(gradeNumRaw) + bias) - 1) * scale;
 
+  const gradeNum = Math.max(1, Math.min(MAX_GRADE, curved)); // cap at 4.5 max, floor at 1
   const grade = useMemo(
     () => (Number.isFinite(gradeNum) ? formatGradeHalfStar(gradeNum) : "—"),
     [gradeNum]
@@ -295,6 +233,67 @@ export default function ResultsClient() {
     () => holdings.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0),
     [holdings]
   );
+
+  // Share uses the SAME displayed grade string to keep OG/download/pdf consistent
+  async function handleMakeShareLink() {
+    try {
+      setShareError(null);
+      if (!preview) return;
+      const provider = (preview.provider_display || preview.provider || "").toString();
+      const profile = (preview.profile || "").toString();
+
+      if (!provider || !profile || grade === "—") {
+        setShareError("Grade not ready to share.");
+        return;
+      }
+
+      setShareWorking(true);
+
+      const res = await fetch("/api/share/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider,
+          profile,
+          grade, // already half-step & capped
+          as_of_date: new Date().toISOString().slice(0, 10),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data?.id) {
+        throw new Error(data?.error || "Failed to create share link");
+      }
+
+      const url = `${window.location.origin}/share/${data.id}`;
+      setShareUrl(url);
+      setShareId(data.id);
+    } catch (e: any) {
+      setShareError(e?.message || "Could not create share link.");
+    } finally {
+      setShareWorking(false);
+    }
+  }
+
+  function copyLink() {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }
+
+  async function handleDownloadImage() {
+    if (!shareId) return;
+    const res = await fetch(`/api/share/og/${encodeURIComponent(shareId)}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "my-401k-grade.png";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   // Helper for social links once shareUrl exists
   const enc = (s: string) => encodeURIComponent(s);
