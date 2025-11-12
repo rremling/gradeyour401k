@@ -346,12 +346,9 @@ if (nav && nav.type === "back_forward") {
   }, [preview]);
 
   const gradeNum: number = useMemo(() => {
-    const ga = Number(preview?.grade_adjusted);
-    const gb = Number(preview?.grade_base);
-    if (Number.isFinite(ga)) return ga;
-    if (Number.isFinite(gb)) return gb;
-    return holdings.length ? computePrelimGrade(profile, holdings) : 0;
-  }, [preview, holdings, profile]);
+  const g = computePrelimGrade(profile, holdings);
+  return Number.isFinite(g) ? g : 0;
+}, [holdings, profile]);
 
   const grade = gradeNum ? gradeNum.toFixed(1) : "—";
   const total = holdings.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
