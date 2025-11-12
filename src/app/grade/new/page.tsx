@@ -405,7 +405,7 @@ function NewGradePageInner() {
 
     async function hydrateFromPreview(id: string) {
       try {
-        const res = await fetch(`/api/preview/${encodeURIComponent(id)}`, {
+        const res = await fetch(`/api/preview/get?id=${encodeURIComponent(id)}`, {
           method: "GET",
           headers: { Accept: "application/json" },
           cache: "no-store",
