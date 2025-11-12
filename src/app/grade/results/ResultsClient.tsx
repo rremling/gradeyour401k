@@ -108,89 +108,20 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   );
 }
 
-// ─────────────── Grade logic: diversification, family, provider, bonds ─────────
-function isBondSymbol(sym: string): boolean {
-  // Heuristic via label keywords
-  const lbl = (labelFor(sym) || "").toLowerCase();
-  return /bond|treasury|fixed income|aggregate|corporate|muni|municipal|income/.test(lbl);
-}
-
-function fundFamily(sym: string): string {
-  // First word of the label often carries the family (e.g., "Fidelity 500 Index")
-  const lbl = (labelFor(sym) || "").trim();
-  if (!lbl) return "";
-  const first = lbl.split(/\s+/)[0];
-  return first || "";
-}
-
-function computeSmartGrade(profile: string, rows: Holding[], providerDisplay: string): number {
+function computePrelimGrade(profile: string, rows: Holding[]): number {
   const weights = rows.map((r) => (Number.isFinite(r.weight) ? r.weight : 0));
   const total = weights.reduce((s, n) => s + n, 0);
 
-  // Baseline by profile
   let base =
-    profile === "Aggressive Growth" ? 4.4 :
-    profile === "Balanced" ? 4.0 :
-    4.2;
+    profile === "Aggressive Growth" ? 4.5 :
+    profile === "Balanced" ? 3.8 :
+    4.1;
 
-  // Keep total allocation near 100%
   const off = Math.abs(100 - total);
-  if (off > 0.25) base -= Math.min(0.8, off / 100); // small, linear penalty
-
-  // Position concentration sanity check: >60% in a single fund is a small ding
+  if (off > 0.25) base -= Math.min(1, off / 100);
   if (Math.max(0, ...weights) > 60) base -= 0.2;
 
-  // Diversification: sweet spot is 6–8 holdings
-  const n = rows.length;
-  if (n >= 6 && n <= 8) {
-    base += 0.35; // reward sweet spot
-  } else {
-    // gentle penalty as we move away from the sweet spot
-    const dist = Math.min(Math.abs(n - 7), 10);
-    base -= dist * 0.05; // max -0.5
-  }
-
-  // Provider list usage: credit symbols that exist in our map (treated as curated list)
-  const curatedCount = rows.filter((r) => !!FUND_LABELS[(r.symbol || "").toUpperCase()]).length;
-  if (n > 0) {
-    const curatedRatio = curatedCount / n; // 0..1
-    base += (curatedRatio - 0.6) * 0.5; // bonus if >60% curated, up to +0.2; small ding if far below
-  }
-
-  // Fund family alignment: encourage staying within a family (clean implementation path)
-  // Weight share of the dominant family
-  const familyWeights: Record<string, number> = {};
-  rows.forEach((r) => {
-    const fam = fundFamily(r.symbol);
-    familyWeights[fam] = (familyWeights[fam] || 0) + (Number(r.weight) || 0);
-  });
-  const topFamily = Object.entries(familyWeights).sort((a, b) => b[1] - a[1])[0];
-  const topFamilyPct = topFamily ? topFamily[1] : 0;
-
-  // If top family carries 55–85% of the weight, give a modest bonus (implementation simplicity & fee cohesion)
-  if (topFamilyPct >= 55 && topFamilyPct <= 85) {
-    base += 0.25;
-  } else if (topFamilyPct > 90) {
-    // Avoid over-concentration in a single family
-    base -= 0.1;
-  }
-
-  // Bonds penalty: discourage excessive bond weight in high inflation
-  const bondPct = rows.reduce((s, r) => s + (isBondSymbol(r.symbol) ? (Number(r.weight) || 0) : 0), 0);
-  // Thresholds by profile
-  const bondThresh =
-    profile === "Aggressive Growth" ? 20 :
-    profile === "Balanced" ? 35 :
-    50;
-  if (bondPct > bondThresh) {
-    // scale penalty with overshoot; cap so it doesn't dominate
-    const overshoot = bondPct - bondThresh; // e.g., 55% bonds in Balanced -> 20% overshoot
-    base -= Math.min(0.9, overshoot * 0.03); // -0.03 per point over threshold
-  }
-
-  // Clamp and half-star rounding
-  const clamped = Math.max(1, Math.min(5, base));
-  return Math.round(clamped * 2) / 2;
+  return Math.max(1, Math.min(5, Math.round(base * 2) / 2));
 }
 
 function Stars({ value }: { value: number }) {
@@ -220,44 +151,16 @@ export default function ResultsClient() {
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
-  // ─── NEW: persist the user's holdings locally for seamless "Edit inputs" ───
-  useEffect(() => {
-    // As soon as we have preview/rows, persist a light, PII-free snapshot for re-entry
-    if (!preview) return;
-    const rows = Array.isArray(preview.rows) ? preview.rows : [];
-    const normalized: Holding[] = rows
-      .map((r) => ({
-        symbol: String(r?.symbol || "").toUpperCase().trim(),
-        weight: Number(r?.weight ?? 0),
-      }))
-      .filter((r) => r.symbol && Number.isFinite(r.weight));
-
-    // Only persist if we actually have holdings
-    if (normalized.length > 0 && typeof window !== "undefined") {
-      const payload = {
-        previewId,
-        provider: preview.provider_display || preview.provider || null,
-        profile: preview.profile || null,
-        rows: normalized,
-        savedAt: new Date().toISOString(),
-      };
-      try {
-        localStorage.setItem("gy401k:lastPreview", JSON.stringify(payload));
-      } catch {
-        // ignore quota issues
-      }
-    }
-  }, [preview, previewId]);
-
   async function handleMakeShareLink() {
     try {
       setShareError(null);
       if (!preview) return;
       const provider = (preview.provider_display || preview.provider || "").toString();
       const profile = (preview.profile || "").toString();
-
-      // Use the on-page computed grade
-      const gradeNumber = Number(gradeNum);
+      const gradeNumber =
+        Number(preview.grade_adjusted) ||
+        Number(preview.grade_base) ||
+        0;
 
       if (!provider || !profile || !Number.isFinite(gradeNumber) || gradeNumber <= 0) {
         setShareError("Grade not ready to share.");
@@ -269,10 +172,11 @@ export default function ResultsClient() {
       const res = await fetch("/api/share/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // Only redacted fields — no PII
         body: JSON.stringify({
           provider,
           profile,
-          grade: (Math.round(gradeNumber * 10) / 10).toFixed(1), // e.g., "4.5"
+          grade: (Math.round(gradeNumber * 10) / 10).toFixed(1), // e.g., "4.3"
           as_of_date: new Date().toISOString().slice(0, 10),     // YYYY-MM-DD
         }),
       });
@@ -285,6 +189,9 @@ export default function ResultsClient() {
       const url = `${window.location.origin}/share/${data.id}`;
       setShareUrl(url);
       setShareId(data.id);
+
+      // NOTE: removed automatic navigator.share invocation
+      // Clicking "Share your grade" now only reveals the menu.
     } catch (e: any) {
       setShareError(e?.message || "Could not create share link.");
     } finally {
@@ -312,6 +219,8 @@ export default function ResultsClient() {
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  // ───────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     let alive = true;
@@ -348,7 +257,10 @@ export default function ResultsClient() {
   }, [previewId]);
 
   const providerDisplay = useMemo(
-    () => preview?.provider_display || preview?.provider || "—",
+    () =>
+      preview?.provider_display ||
+      preview?.provider ||
+      "—",
     [preview]
   );
 
@@ -367,37 +279,16 @@ export default function ResultsClient() {
       .filter((r) => r.symbol && Number.isFinite(r.weight));
   }, [preview]);
 
-  // NEW: always compute the on-page grade with the updated rubric
   const gradeNum: number = useMemo(() => {
-    return holdings.length ? computeSmartGrade(profile, holdings, providerDisplay) : 0;
-  }, [holdings, profile, providerDisplay]);
+    const ga = Number(preview?.grade_adjusted);
+    const gb = Number(preview?.grade_base);
+    if (Number.isFinite(ga)) return ga;
+    if (Number.isFinite(gb)) return gb;
+    return holdings.length ? computePrelimGrade(profile, holdings) : 0;
+  }, [preview, holdings, profile]);
 
   const grade = gradeNum ? gradeNum.toFixed(1) : "—";
   const total = holdings.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
-
-  // Quick stats for the description
-  const bondsPct = useMemo(
-    () => holdings.reduce((s, r) => s + (isBondSymbol(r.symbol) ? (Number(r.weight) || 0) : 0), 0),
-    [holdings]
-  );
-  const curatedCount = useMemo(
-    () => holdings.filter((r) => !!FUND_LABELS[(r.symbol || "").toUpperCase()]).length,
-    [holdings]
-  );
-  const familyWeights: Record<string, number> = useMemo(() => {
-    const m: Record<string, number> = {};
-    holdings.forEach((r) => {
-      const fam = fundFamily(r.symbol);
-      m[fam] = (m[fam] || 0) + (Number(r.weight) || 0);
-    });
-    return m;
-  }, [holdings]);
-  const topFamily = useMemo(
-    () => Object.entries(familyWeights).sort((a, b) => b[1] - a[1])[0],
-    [familyWeights]
-  );
-  const topFamilyName = topFamily?.[0] || "—";
-  const topFamilyPct = topFamily?.[1] || 0;
 
   // Helper for social links once shareUrl exists
   const enc = (s: string) => encodeURIComponent(s);
@@ -440,7 +331,9 @@ export default function ResultsClient() {
                 <div className="text-xs text-gray-600 mb-1">Total allocation</div>
                 <div className="w-44 h-2 rounded-full bg-gray-200 overflow-hidden">
                   <div
-                    className={`h-full ${Math.abs(100 - total) < 0.1 ? "bg-emerald-500" : "bg-yellow-500"}`}
+                    className={`h-full ${
+                      Math.abs(100 - total) < 0.1 ? "bg-emerald-500" : "bg-yellow-500"
+                    }`}
                     style={{ width: `${Math.min(100, Math.max(0, total))}%` }}
                   />
                 </div>
@@ -448,25 +341,7 @@ export default function ResultsClient() {
               </div>
             </div>
 
-            {/* NEW: brief explanation of how this grade is computed */}
-            <div className="mt-4 text-sm text-gray-700 border-t pt-4">
-              <p className="mb-2">
-                <span className="font-medium">How we scored this:</span> We reward{" "}
-                <span className="font-medium">diversification</span> (sweet spot is 6–8 funds), give credit for{" "}
-                <span className="font-medium">using curated plan funds</span> and for{" "}
-                <span className="font-medium">staying within a single fund family</span> for clean implementation, and
-                apply a penalty for <span className="font-medium">excessive bond exposure</span> in high-inflation environments.
-                Market-cycle tuning is <span className="font-medium">not</span> applied to this free grade—it <span className="font-medium">is</span> included in the Optimized 401(k) Report below.
-              </p>
-              <ul className="text-xs text-gray-600 space-y-1">
-                <li>Funds held: <span className="font-medium">{holdings.length}</span> (target 6–8)</li>
-                <li>From plan list: <span className="font-medium">{curatedCount}</span> / {holdings.length || 0}</li>
-                <li>Top fund family: <span className="font-medium">{topFamilyName}</span> (~{topFamilyPct.toFixed(1)}% of weight)</li>
-                <li>Bond allocation: <span className="font-medium">{bondsPct.toFixed(1)}%</span></li>
-              </ul>
-            </div>
-
-            {/* ─── Share controls (PII-safe) ─────────────────────────── */}
+            {/* ─── NEW: Share controls (PII-safe) ─────────────────────────── */}
             <div className="mt-4 border-t pt-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <button
@@ -562,19 +437,17 @@ export default function ResultsClient() {
 
           {/* CTA */}
           <section className="rounded-xl border bg-white p-6 shadow-sm">
-            <h2 className="font-semibold">⭐⭐⭐⭐⭐ Get Your 5-Star Optimized 401(k) Report</h2>
-
+            <h2 className="font-semibold">Make it 5-Stars with an Optimized Report ⭐⭐⭐⭐⭐</h2>
             <p className="text-sm text-gray-700 mt-2">
-              Unlock a personalized PDF that shows exactly how to align your 401(k) with your investor profile and the current market.
+              Get your GradeYour401k PDF report with <span className="font-medium">exact allocations</span>, that
+              <span className="font-medium"> model match</span> for your profile, with 
+              <span className="font-medium"> market optimization</span> so you can implement confidently.
             </p>
-
             <ul className="list-disc list-inside text-sm text-gray-800 mt-3 space-y-1">
-              <li><span className="font-medium">Precise Target Allocations</span> – See your ideal portfolio weights and fund matches.</li>
-              <li><span className="font-medium">Specific Fund Changes</span> – Know exactly what to adjust to reach your optimized mix.</li>
-              <li><span className="font-medium">Market-Tuned Strategy</span> – Stay in step with today’s leading investment trends.</li>
-              <li><span className="font-medium">Clear Next Steps</span> – No guesswork, just actionable guidance you can implement confidently.</li>
+              <li>Specific fund changes to reach the target allocation</li>
+              <li>Market cycle tuning - to allocate for best performance</li>
+              <li>Clear next steps—no guesswork</li>
             </ul>
-
             <div className="mt-4 flex flex-col sm:flex-row gap-3">
               <Link
                 href="/pricing"
@@ -583,13 +456,12 @@ export default function ResultsClient() {
                 Buy optimized report
               </Link>
               <Link
-                href={`/grade/new?previewId=${encodeURIComponent(previewId)}&from=results`}
+                href={`/grade/new?previewId=${encodeURIComponent(previewId)}`}
                 className="inline-flex items-center justify-center rounded-lg border px-5 py-2.5 hover:bg-gray-50"
               >
                 Edit inputs
               </Link>
             </div>
-
             <p className="text-xs text-gray-500 mt-2">
               You can revisit and tweak your entries—your preview is linked above.
             </p>
