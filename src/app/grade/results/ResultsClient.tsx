@@ -19,7 +19,7 @@ type Preview = {
   grade_adjusted?: number | string | null;
 };
 
-// ───────────────────────── Stepper (mobile-friendly) ─────────────────────────
+// ---- Stepper (mobile-friendly) ----
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -62,7 +62,7 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
         })}
       </ol>
 
-      {/* Full labels with horizontal scroll on larger screens */}
+      {/* Full labels with horizontal scroll if needed */}
       <div className="hidden sm:block">
         <div className="-mx-3 overflow-x-auto overscroll-x-contain">
           <ol className="flex items-center gap-3 flex-nowrap px-3">
