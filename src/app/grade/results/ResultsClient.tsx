@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FUND_LABELS, labelFor } from "@/lib/funds";
+import { computeFinalGrade, formatGradeHalfStar } from "@/lib/grade";
 
 type Holding = { symbol: string; weight: number };
 type Preview = {
@@ -107,70 +108,6 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
     </div>
   );
 }
-function isBondSymbol(sym: string): boolean {
-  const lbl = (labelFor(sym) || "").toLowerCase();
-  return /bond|treasury|fixed income|aggregate|corporate|muni|municipal|income|tips/.test(lbl);
-}
-
-function fundFamily(sym: string): string {
-  const lbl = (labelFor(sym) || "").trim();
-  if (!lbl) return "";
-  return lbl.split(/\s+/)[0] || "";
-}
-
-function computePrelimGrade(profile: string, rows: Holding[]): number {
-  const weights = rows.map((r) => (Number.isFinite(r.weight) ? r.weight : 0));
-  const total = weights.reduce((s, n) => s + n, 0);
-
-  let base =
-  (profile === "Growth" || profile === "Aggressive Growth") ? 4.5 :
-  profile === "Balanced" ? 3.8 :
-  4.1;
-
-
-  const off = Math.abs(100 - total);
-  if (off > 0.25) base -= Math.min(0.8, off / 100);
-
-  if (Math.max(0, ...weights) > 60) base -= 0.2;
-
-  const n = rows.length;
-  if (n >= 6 && n <= 8) {
-    base += 0.35;
-  } else {
-    const dist = Math.min(Math.abs(n - 7), 10);
-    base -= dist * 0.05;
-  }
-
-  const curatedCount = rows.filter((r) => !!FUND_LABELS[(r.symbol || "").toUpperCase()]).length;
-  if (n > 0) {
-    const curatedRatio = curatedCount / n;
-    base += (curatedRatio - 0.6) * 0.5;
-  }
-
-  const familyWeights: Record<string, number> = {};
-  rows.forEach((r) => {
-    const fam = fundFamily(r.symbol);
-    familyWeights[fam] = (familyWeights[fam] || 0) + (Number(r.weight) || 0);
-  });
-  const topFamily = Object.entries(familyWeights).sort((a, b) => b[1] - a[1])[0];
-  const topFamilyPct = topFamily ? topFamily[1] : 0;
-
-  if (topFamilyPct >= 55 && topFamilyPct <= 85) base += 0.25;
-  else if (topFamilyPct > 90) base -= 0.1;
-
-  const bondPct = rows.reduce((s, r) => s + (isBondSymbol(r.symbol) ? (Number(r.weight) || 0) : 0), 0);
-  const bondThresh =
-  (profile === "Growth" || profile === "Aggressive Growth") ? 20 :
-  profile === "Balanced" ? 35 :
-  50;
-  if (bondPct > bondThresh) {
-    const overshoot = bondPct - bondThresh;
-    base -= Math.min(0.9, overshoot * 0.03);
-  }
-
-  const clamped = Math.max(1, Math.min(5, base));
-  return Math.round(clamped * 2) / 2;
-}
 
 function Stars({ value }: { value: number }) {
   const pct = Math.max(0, Math.min(100, (value / 5) * 100));
@@ -189,30 +126,27 @@ export default function ResultsClient() {
   const previewId = (sp.get("previewId") || "").trim();
   const router = useRouter();
 
-useEffect(() => {
-  // Refresh if page was restored from back/forward cache
-  const onPageShow = (e: any) => {
-    if (e?.persisted) router.refresh();
-  };
+  useEffect(() => {
+    // Refresh if page was restored from back/forward cache
+    const onPageShow = (e: any) => {
+      if (e?.persisted) router.refresh();
+    };
+    // Also handle Chrome's Navigation Timing for back/forward
+    const navEntries = performance.getEntriesByType("navigation");
+    const nav = (navEntries && (navEntries[0] as any)) || null;
+    if (nav && nav.type === "back_forward") router.refresh();
 
-  // Also handle Chrome's Navigation Timing for back/forward
- const navEntries = performance.getEntriesByType("navigation");
-const nav = (navEntries && navEntries[0]) as any;
-if (nav && nav.type === "back_forward") {
-  router.refresh();
-}
-
-  window.addEventListener("pageshow", onPageShow);
-  return () => window.removeEventListener("pageshow", onPageShow);
-}, [router]);
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, [router]);
 
   const [loading, setLoading] = useState<boolean>(!!previewId);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
 
-  // ─── NEW: share state ──────────────────────────────────────────────────────
+  // ─── share state ───────────────────────────────────────────────────────────
   const [shareUrl, setShareUrl] = useState<string>("");
-  const [shareId, setShareId] = useState<string>(""); // store id for image download
+  const [shareId, setShareId] = useState<string>("");
   const [shareWorking, setShareWorking] = useState<boolean>(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -238,12 +172,11 @@ if (nav && nav.type === "back_forward") {
       const res = await fetch("/api/share/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Only redacted fields — no PII
         body: JSON.stringify({
           provider,
           profile,
-          grade: (Math.round(gradeNumber * 10) / 10).toFixed(1), // e.g., "4.3"
-          as_of_date: new Date().toISOString().slice(0, 10),     // YYYY-MM-DD
+          grade: (Math.round(gradeNumber * 10) / 10).toFixed(1),
+          as_of_date: new Date().toISOString().slice(0, 10),
         }),
       });
 
@@ -255,9 +188,6 @@ if (nav && nav.type === "back_forward") {
       const url = `${window.location.origin}/share/${data.id}`;
       setShareUrl(url);
       setShareId(data.id);
-
-      // NOTE: removed automatic navigator.share invocation
-      // Clicking "Share your grade" now only reveals the menu.
     } catch (e: any) {
       setShareError(e?.message || "Could not create share link.");
     } finally {
@@ -273,7 +203,6 @@ if (nav && nav.type === "back_forward") {
     });
   }
 
-  // download the OG image PNG for the created share id
   async function handleDownloadImage() {
     if (!shareId) return;
     const res = await fetch(`/api/share/og/${encodeURIComponent(shareId)}`);
@@ -287,7 +216,6 @@ if (nav && nav.type === "back_forward") {
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-
   useEffect(() => {
     let alive = true;
     async function run() {
@@ -319,14 +247,13 @@ if (nav && nav.type === "back_forward") {
       }
     }
     run();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [previewId]);
 
   const providerDisplay = useMemo(
-    () =>
-      preview?.provider_display ||
-      preview?.provider ||
-      "—",
+    () => preview?.provider_display || preview?.provider || "—",
     [preview]
   );
 
@@ -345,19 +272,37 @@ if (nav && nav.type === "back_forward") {
       .filter((r) => r.symbol && Number.isFinite(r.weight));
   }, [preview]);
 
-  const gradeNum: number = useMemo(() => {
-  const g = computePrelimGrade(profile, holdings);
-  return Number.isFinite(g) ? g : 0;
-}, [holdings, profile]);
+  const gradeNum = useMemo(() => {
+    const ga = Number(preview?.grade_adjusted);
+    const gb = Number(preview?.grade_base);
+    if (Number.isFinite(ga)) return ga;
+    if (Number.isFinite(gb)) return gb;
+    return computeFinalGrade(profile, holdings);
+  }, [preview, holdings, profile]);
 
-  const grade = gradeNum ? gradeNum.toFixed(1) : "—";
-  const total = holdings.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0);
+  const grade = useMemo(
+    () => (Number.isFinite(gradeNum) ? formatGradeHalfStar(gradeNum) : "—"),
+    [gradeNum]
+  );
+
+  const total = useMemo(
+    () => holdings.reduce((s, r) => s + (Number.isFinite(r.weight) ? r.weight : 0), 0),
+    [holdings]
+  );
 
   // Helper for social links once shareUrl exists
   const enc = (s: string) => encodeURIComponent(s);
-  const xUrl  = shareUrl ? `https://twitter.com/intent/tweet?text=${enc("Just got my 401(k) graded on GradeYour401k!")}&url=${enc(shareUrl)}` : "";
-  const liUrl = shareUrl ? `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}` : "";
-  const fbUrl = shareUrl ? `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}` : "";
+  const xUrl = shareUrl
+    ? `https://twitter.com/intent/tweet?text=${enc("Just got my 401(k) graded on GradeYour401k!")}&url=${enc(
+        shareUrl
+      )}`
+    : "";
+  const liUrl = shareUrl
+    ? `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}`
+    : "";
+  const fbUrl = shareUrl
+    ? `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}`
+    : "";
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
@@ -390,8 +335,10 @@ if (nav && nav.type === "back_forward") {
                   <span className="font-medium">{profile}</span>
                 </p>
                 <p className="text-sm text-gray-700 mt-1 italic">
-                The grade summarizes how effectively your 401(k) holdings achieve diversification, stay aligned with your profile, and make efficient use of your provider’s investment options.
-            </p>
+                  The grade summarizes how effectively your 401(k) holdings achieve diversification,
+                  stay aligned with your profile, and make efficient use of your provider’s investment
+                  options.
+                </p>
               </div>
               <div className="text-right hidden sm:block">
                 <div className="text-xs text-gray-600 mb-1">Total allocation</div>
@@ -407,7 +354,7 @@ if (nav && nav.type === "back_forward") {
               </div>
             </div>
 
-            {/* ─── NEW: Share controls (PII-safe) ─────────────────────────── */}
+            {/* Share controls */}
             <div className="mt-4 border-t pt-4">
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <button
@@ -418,20 +365,20 @@ if (nav && nav.type === "back_forward") {
                   {shareWorking ? "Preparing share link…" : "Share your grade"}
                 </button>
 
-                {shareError && (
-                  <span className="text-sm text-red-600">{shareError}</span>
-                )}
+                {shareError && <span className="text-sm text-red-600">{shareError}</span>}
 
                 {shareUrl && (
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={() => {
                         if (navigator.share) {
-                          navigator.share({
-                            title: "My 401(k) Grade",
-                            text: "Just got my 401(k) graded on GradeYour401k!",
-                            url: shareUrl,
-                          }).catch(() => {});
+                          navigator
+                            .share({
+                              title: "My 401(k) Grade",
+                              text: "Just got my 401(k) graded on GradeYour401k!",
+                              url: shareUrl,
+                            })
+                            .catch(() => {});
                         } else {
                           copyLink();
                         }
@@ -440,29 +387,47 @@ if (nav && nav.type === "back_forward") {
                     >
                       System Share
                     </button>
-                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={xUrl} target="_blank" rel="noopener noreferrer">
+                    <a
+                      className="rounded-lg border px-3 py-2 hover:bg-gray-50"
+                      href={xUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       X/Twitter
                     </a>
-                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={liUrl} target="_blank" rel="noopener noreferrer">
+                    <a
+                      className="rounded-lg border px-3 py-2 hover:bg-gray-50"
+                      href={liUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       LinkedIn
                     </a>
-                    <a className="rounded-lg border px-3 py-2 hover:bg-gray-50" href={fbUrl} target="_blank" rel="noopener noreferrer">
+                    <a
+                      className="rounded-lg border px-3 py-2 hover:bg-gray-50"
+                      href={fbUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       Facebook
                     </a>
-                    <button onClick={handleDownloadImage} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
+                    <button
+                      onClick={handleDownloadImage}
+                      className="rounded-lg border px-3 py-2 hover:bg-gray-50"
+                    >
                       Download share image
                     </button>
-                    <button onClick={copyLink} className="rounded-lg border px-3 py-2 hover:bg-gray-50">
+                    <button
+                      onClick={copyLink}
+                      className="rounded-lg border px-3 py-2 hover:bg-gray-50"
+                    >
                       {copied ? "Copied!" : "Copy link"}
                     </button>
                   </div>
                 )}
               </div>
-              {shareUrl && (
-                <p className="text-xs text-gray-500 mt-1 break-all">{shareUrl}</p>
-              )}
+              {shareUrl && <p className="text-xs text-gray-500 mt-1 break-all">{shareUrl}</p>}
             </div>
-            {/* ─────────────────────────────────────────────────────────────── */}
           </section>
 
           {/* Holdings list */}
@@ -482,7 +447,10 @@ if (nav && nav.type === "back_forward") {
                   const sym = (r.symbol || "").toUpperCase().trim();
                   const desc = FUND_LABELS[sym];
                   return (
-                    <li key={`${r.symbol}-${idx}`} className="py-2 flex items-start justify-between gap-3">
+                    <li
+                      key={`${r.symbol}-${idx}`}
+                      className="py-2 flex items-start justify-between gap-3"
+                    >
                       <div className="min-w-0">
                         <div className="font-mono font-medium">{r.symbol}</div>
                         <div className="text-xs text-gray-600 truncate" title={labelFor(r.symbol)}>
@@ -505,9 +473,11 @@ if (nav && nav.type === "back_forward") {
           <section className="rounded-xl border bg-white p-6 shadow-sm">
             <h2 className="font-semibold">Make it 5-Stars with an Optimized Report ⭐⭐⭐⭐⭐</h2>
             <p className="text-sm text-gray-700 mt-2">
-              Get your GradeYour401k PDF report with <span className="font-medium">exact allocations</span>, that
-              <span className="font-medium"> model match</span> for your profile, with 
-              <span className="font-medium"> market optimization</span> so you can implement confidently.
+              Get your GradeYour401k PDF report with{" "}
+              <span className="font-medium">exact allocations</span>, that
+              <span className="font-medium"> model match</span> for your profile, with
+              <span className="font-medium"> market optimization</span> so you can implement
+              confidently.
             </p>
             <ul className="list-disc list-inside text-sm text-gray-800 mt-3 space-y-1">
               <li>Specific fund changes to reach the target allocation</li>
