@@ -1,4 +1,4 @@
- // src/lib/data.ts
+// src/lib/data.ts
 import { query } from "@/lib/db";
 
 /* ────────────────────────────────────────────────────────────
@@ -245,7 +245,11 @@ export async function computeAndStoreMetrics(
 
   const nonNullCount = scored.filter((r) => r.ret_21d !== null || r.ret_63d !== null).length;
   const coverage = nonNullCount / (symbols.length || 1);
-  console.log(`[metrics] ${nonNullCount}/${symbols.length} symbols have data for ${asof} (coverage=${(coverage * 100).toFixed(1)}%)`);
+  console.log(
+    `[metrics] ${nonNullCount}/${symbols.length} symbols have data for ${asof} (coverage=${(
+      coverage * 100
+    ).toFixed(1)}%)`
+  );
 
   return { asof, written };
 }
@@ -290,6 +294,50 @@ export async function fetchFearGreed(): Promise<{ reading: number; source: strin
     console.warn("[fear_greed] fetch failed:", (e as Error).message);
     return null;
   }
+}
+
+/**
+ * Run your daily metrics pipeline:
+ * - Fetch latest Fear & Greed and cache it in fear_greed_cache
+ * - Return { asof, reading } based on the latest row in that table
+ *
+ * This is what /api/cron/rebuild-models calls.
+ */
+export async function runDailyMetricsPipeline(): Promise<{
+  asof: string;
+  reading: number | null;
+}> {
+  // 1) Try to fetch and cache the latest Fear & Greed reading
+  let reading: number | null = null;
+  try {
+    const fg = await fetchFearGreed();
+    if (fg) reading = fg.reading;
+  } catch (e) {
+    console.warn("[runDailyMetricsPipeline] fetchFearGreed failed:", (e as Error).message);
+  }
+
+  // 2) Look up the most recent row in fear_greed_cache to get asof + reading
+  let asof = todayUTC();
+  try {
+    const res: any = await query(
+      `SELECT asof_date, reading
+         FROM fear_greed_cache
+        ORDER BY asof_date DESC
+        LIMIT 1`
+    );
+
+    const row = Array.isArray(res?.rows) ? res.rows[0] : Array.isArray(res) ? res[0] : null;
+    if (row?.asof_date) {
+      asof = String(row.asof_date).slice(0, 10);
+      if (reading === null && row.reading != null) {
+        reading = Number(row.reading);
+      }
+    }
+  } catch (e) {
+    console.warn("[runDailyMetricsPipeline] failed to read fear_greed_cache:", (e as Error).message);
+  }
+
+  return { asof, reading };
 }
 
 /* ────────────────────────────────────────────────────────────
