@@ -1,7 +1,9 @@
+// src/app/api/report/generate-and-email/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { Pool } from "pg";
 import { generatePdfBuffer } from "@lib/pdf";
 import { fetchLatestModel } from "@/lib/models-client"; // <-- NEW: server-side model fetch
+import { computeFinalGrade } from "@/lib/grade";
 
 export const dynamic = "force-dynamic";
 
@@ -217,16 +219,21 @@ export async function POST(req: NextRequest) {
     }
 
     const rows = parseRows(preview.rows);
-    const toNum = (v: any) => {
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    };
-    const grade = toNum(preview.grade_adjusted) ?? toNum(preview.grade_base);
 
-    // --- NEW: fetch the latest model + sentiment server-side ----------------
+    // --- NEW: compute grade server-side from normalized holdings ------------
+    const holdings = rows
+      .map((r: any) => ({
+        symbol: String(r?.symbol || "").toUpperCase().trim(),
+        weight: Number(r?.weight ?? 0),
+      }))
+      .filter((r) => r.symbol && Number.isFinite(r.weight));
+
     const providerForModel: string = preview.provider_display || preview.provider || "Fidelity";
     const profileForModel: string = preview.profile || "Balanced";
 
+    const gradeNum = computeFinalGrade(profileForModel, holdings);
+
+    // --- NEW: fetch the latest model + sentiment server-side ----------------
     let model: Awaited<ReturnType<typeof fetchLatestModel>> | null = null;
     try {
       model = await fetchLatestModel(providerForModel, profileForModel);
@@ -235,23 +242,21 @@ export async function POST(req: NextRequest) {
       model = null; // don’t fail the whole report if model fetch hiccups
     }
 
-    // --- Generate PDF (pass model data through) -----------------------------
+    // --- Generate PDF (pass computed grade) ---------------------------------
     const pdfBytes = await generatePdfBuffer({
       provider: providerForModel,
       profile: profileForModel,
-      grade,
-      holdings: rows,
+      grade: gradeNum,
+      holdings,
       logoUrl: "https://i.imgur.com/DMCbj99.png",
       clientName: preview.profile || undefined,
       reportDate: preview.created_at || undefined,
 
-      // NEW: add model data for the PDF template to render (kept optional)
-      // Cast as any to avoid touching @lib/pdf types right now.
       ...(model
         ? ({
             model_asof: model.asof,
             model_lines: model.lines,
-            model_fear_greed: model.fear_greed, // { asof_date, reading } | null
+            model_fear_greed: model.fear_greed,
           } as any)
         : ({} as any)),
     } as any);
@@ -285,15 +290,15 @@ export async function POST(req: NextRequest) {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px 0;">
       <tr>
         <td style="padding:8px 0;width:160px;color:#555;">Grade</td>
-        <td style="padding:8px 0;"><strong>${grade !== null ? `${Number(grade).toFixed(1)} / 5` : "—"}</strong></td>
+        <td style="padding:8px 0;"><strong>${Number(gradeNum).toFixed(1)} / 5</strong></td>
       </tr>
       <tr>
         <td style="padding:8px 0;color:#555;">Provider</td>
-        <td style="padding:8px 0;">${preview.provider_display || preview.provider || "—"}</td>
+        <td style="padding:8px 0;">${providerForModel}</td>
       </tr>
       <tr>
         <td style="padding:8px 0;color:#555;">Profile</td>
-        <td style="padding:8px 0;">${preview.profile || "—"}</td>
+        <td style="padding:8px 0;">${profileForModel}</td>
       </tr>
     </table>
 
@@ -304,7 +309,6 @@ export async function POST(req: NextRequest) {
   <li style="margin:6px 0;">Review your latest report and confirm your provider and investor profile are up to date.</li>
   <li style="margin:6px 0;">Update your details if needed and view/download past reports anytime.</li>
 </ol>
-
 
     <!-- Blue CTA button -->
     <div style="margin:20px 0 10px;">
