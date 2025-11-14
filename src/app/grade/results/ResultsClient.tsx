@@ -217,8 +217,8 @@ export default function ResultsClient() {
 
   // Downshift + compress toward 1.0 to avoid everything clustering near 4.5
   // adjusted = 1 + ( (raw + bias) - 1 ) * scale
-  const bias = -0.50;   // subtract ~0.35 stars overall
-  const scale = 0.85;   // compress spread by 10%
+  const bias = -0.35;   // subtract ~0.35 stars overall
+  const scale = 1.10;   // compress spread by 10%
   const curved = 1 + ((Number(gradeNumRaw) + bias) - 1) * scale;
 
   const gradeNum = Math.max(1, Math.min(MAX_GRADE, curved)); // cap at 4.5 max, floor at 1
