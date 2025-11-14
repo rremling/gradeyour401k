@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getMarketRegime } from "@/lib/market";
 import { generatePdfBuffer } from "@/lib/pdf";
+import { fetchLatestModel } from "@/lib/models-client"; // ✅ NEW
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -151,28 +152,20 @@ function buildOneTimeStyleHtml(args: {
 
 /** ─────────────────────────  Handler  ────────────────────── **/
 export async function GET(req: NextRequest) {
-  // ────────────────────────────────────────────────────────────────
-  // Auth: allow either header (Bearer) or ?secret= param for Vercel Cron
-  // ────────────────────────────────────────────────────────────────
-  const envSecret = process.env.CRON_SECRET || "";
-  const url = new URL(req.url);
-  const qSecret = url.searchParams.get("secret") || "";
-  const hAuth = req.headers.get("authorization") || "";
-
-  if (envSecret) {
-    const okByHeader = hAuth === `Bearer ${envSecret}`;
-    const okByQuery  = qSecret === envSecret;
-    if (!okByHeader && !okByQuery) {
-      return new NextResponse("Unauthorized", { status: 401 });
-    }
+  // Auth: Vercel Cron injects Authorization: Bearer <CRON_SECRET>
+  const expected = `Bearer ${process.env.CRON_SECRET || ""}`;
+  const auth = req.headers.get("authorization") || "";
+  if (!process.env.CRON_SECRET || auth !== expected) {
+    return new NextResponse("Unauthorized", { status: 401 });
   }
 
+  const url = new URL(req.url);
   const dryRun = url.searchParams.get("dry") === "1";
 
   try {
     console.log("[cron] start", { dryRun });
 
-    // Select annual orders due for Q1/Q2/Q3 that haven't been sent
+    // Include preview_id so we can pull real holdings + grade
     const rawDue = await query(`
       WITH candidates AS (
         SELECT
@@ -180,6 +173,7 @@ export async function GET(req: NextRequest) {
           email,
           provider,
           profile,
+          preview_id,
           CASE
             WHEN next_due_1 IS NOT NULL AND q1_sent_at IS NULL AND next_due_1 <= NOW() THEN 'q1'
             WHEN next_due_2 IS NOT NULL AND q2_sent_at IS NULL AND next_due_2 <= NOW() THEN 'q2'
@@ -189,7 +183,7 @@ export async function GET(req: NextRequest) {
         FROM public.orders
         WHERE plan_key = 'annual'
       )
-      SELECT id, email, provider, profile, due_kind
+      SELECT id, email, provider, profile, preview_id, due_kind
       FROM candidates
       WHERE due_kind IS NOT NULL
       LIMIT 20;
@@ -200,10 +194,11 @@ export async function GET(req: NextRequest) {
       email: string | null;
       provider: string | null;
       profile: string | null;
+      preview_id: string | null;
       due_kind: "q1" | "q2" | "q3";
     }>(rawDue);
 
-    console.log("[cron] candidates]", { count: due.length });
+    console.log("[cron] candidates", { count: due.length });
 
     let processed = 0;
     const failures: Array<{ id: number; error: string }> = [];
@@ -212,25 +207,69 @@ export async function GET(req: NextRequest) {
       try {
         if (!row || !row.email) throw new Error("missing email");
 
-        const provider = (row.provider ?? "").trim();
-        const profile = (row.profile ?? "Balanced").trim();
+        // Default to order values; prefer preview values if present
+        let provider = (row.provider ?? "").trim();
+        let profile = (row.profile ?? "Balanced").trim();
+        let holdings: Array<{ symbol: string; weight: number }> = [];
+        let grade: number | null = null;
+        let reportDateISO: string | undefined = undefined;
 
-        // You can compute a real grade/holdings if available; for now we use null/empty to match your template's safe fallbacks
-        const grade: number | null = null;
-        const holdings: Array<{ symbol: string; weight: number }> = [];
+        if (row.preview_id) {
+          const pRes = await query(
+            `SELECT provider, provider_display, profile, "rows", grade_base, grade_adjusted, created_at
+               FROM public.previews
+              WHERE id::text = $1
+              LIMIT 1`,
+            [row.preview_id]
+          );
+          const p = asRows<any>(pRes)[0];
+          if (p) {
+            provider = (p.provider_display || p.provider || provider || "").trim();
+            profile = (p.profile || profile || "Balanced").trim();
 
-        // (Optional) still compute regime if your PDF uses it internally
+            // rows can be JSON or array
+            const rawRows = p.rows;
+            try {
+              holdings = Array.isArray(rawRows) ? rawRows : JSON.parse(rawRows ?? "[]");
+            } catch {
+              holdings = [];
+            }
+
+            const toNum = (v: any) => {
+              const n = Number(v);
+              return Number.isFinite(n) ? n : null;
+            };
+            grade = toNum(p.grade_adjusted) ?? toNum(p.grade_base);
+            reportDateISO = p.created_at ? String(p.created_at) : undefined;
+          }
+        }
+
+        // Ensure regime computed (safe no-op if unused)
         await getMarketRegime().catch(() => null);
 
-        // Build PDF using the same signature you use in one-time
+        // Fetch recommended model for PDF “Recommended Holdings”
+        let model = null as any;
+        try {
+          model = await fetchLatestModel(provider, profile);
+        } catch {
+          model = null;
+        }
+
         const pdfBytes = await generatePdfBuffer({
-          provider: provider || "",
-          profile: profile || "",
+          provider,
+          profile,
           grade,
           holdings,
           logoUrl: "https://i.imgur.com/DMCbj99.png",
           clientName: profile || undefined,
-          reportDate: new Date().toISOString(),
+          reportDate: reportDateISO || new Date().toISOString(),
+          ...(model
+            ? ({
+                model_asof: model.asof,
+                model_lines: model.lines,
+                model_fear_greed: model.fear_greed,
+              } as any)
+            : ({} as any)),
         });
 
         if (!dryRun) {
@@ -257,7 +296,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Log success run in cron_log (even for dry runs so you can see activity)
     await query(
       `INSERT INTO cron_log (job_name, ran_at) VALUES ($1, NOW())`,
       ["report-cron"]
