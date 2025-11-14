@@ -15,11 +15,11 @@ type Preview = {
   provider_display?: string | null;
   profile?: string | null;
   rows?: Array<{ symbol?: string; weight?: number | string }>;
-  grade_base?: number | string | null;
-  grade_adjusted?: number | string | null;
+  grade_base?: number | string | null;     // ignored on this page
+  grade_adjusted?: number | string | null; // ignored on this page
 };
 
-// ---- Stepper (mobile-friendly) ----
+// ───────────────────────── Stepper (mobile-friendly) ─────────────────────────
 function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
   const steps = [
     { n: 1, label: "Get Grade" },
@@ -62,55 +62,58 @@ function Stepper({ current = 2 }: { current?: 1 | 2 | 3 | 4 }) {
         })}
       </ol>
 
-      {/* Full labels (no horizontal scroll on sm+) */}
+      {/* Full labels with horizontal scroll on larger screens */}
       <div className="hidden sm:block">
-        <ol className="flex items-center gap-3 flex-nowrap px-3">
-          {steps.map((s, idx) => {
-            const isActive = s.n === current;
-            const isComplete = s.n < current;
-            return (
-              <li key={s.n} className="flex items-center gap-3 shrink-0">
-                <div
-                  className={[
-                    "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
-                    isActive
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : isComplete
-                      ? "border-blue-600 text-blue-600"
-                      : "border-gray-300 text-gray-600",
-                  ].join(" ")}
-                >
-                  {s.n}
-                </div>
-                <span
-                  className={[
-                    "whitespace-nowrap",
-                    isActive ? "font-semibold text-blue-700" : "text-gray-700",
-                  ].join(" ")}
-                >
-                  {s.label}
-                </span>
-                {idx < steps.length - 1 && (
+        <div className="-mx-3 overflow-x-auto overscroll-x-contain">
+          <ol className="flex items-center gap-3 flex-nowrap px-3">
+            {steps.map((s, idx) => {
+              const isActive = s.n === current;
+              const isComplete = s.n < current;
+              return (
+                <li key={s.n} className="flex items-center gap-3 shrink-0">
                   <div
                     className={[
-                      "mx-2 h-px w-10 md:w-16",
-                      isComplete ? "bg-blue-600" : "bg-gray-300",
+                      "flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold",
+                      isActive
+                        ? "border-blue-600 bg-blue-600 text-white"
+                        : isComplete
+                        ? "border-blue-600 text-blue-600"
+                        : "border-gray-300 text-gray-600",
                     ].join(" ")}
-                  />
-                )}
-              </li>
-            );
-          })}
-        </ol>
+                  >
+                    {s.n}
+                  </div>
+                  <span
+                    className={[
+                      "whitespace-nowrap",
+                      isActive ? "font-semibold text-blue-700" : "text-gray-700",
+                    ].join(" ")}
+                  >
+                    {s.label}
+                  </span>
+                  {idx < steps.length - 1 && (
+                    <div
+                      className={[
+                        "mx-2 h-px w-10 md:w-16",
+                        isComplete ? "bg-blue-600" : "bg-gray-300",
+                      ].join(" ")}
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
       </div>
-    </div>  
-  );       
-}          
+    </div>
+  );
+}
 
 function Stars({ value }: { value: number }) {
-  const pct = Math.max(0, Math.min(100, (value / 5) * 100));
+  const clamped = Math.max(0, Math.min(MAX_GRADE, value || 0));
+  const pct = Math.max(0, Math.min(100, (clamped / 5) * 100));
   return (
-    <div className="relative inline-block align-middle" aria-label={`${value.toFixed(1)} out of 5`}>
+    <div className="relative inline-block align-middle" aria-label={`${clamped.toFixed(1)} out of 5`}>
       <div className="text-3xl text-gray-300 tracking-[2px] select-none">★★★★★</div>
       <div className="absolute left-0 top-0 h-full overflow-hidden" style={{ width: `${pct}%` }}>
         <div className="text-3xl text-yellow-500 tracking-[2px] select-none">★★★★★</div>
@@ -149,7 +152,7 @@ export default function ResultsClient() {
   const [shareError, setShareError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
-  // ── Load preview
+  // ───────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
     async function run() {
@@ -191,7 +194,7 @@ export default function ResultsClient() {
     [preview]
   );
 
-  const profile = useMemo(() => preview?.profile || "—", [preview]);
+  const profile = preview?.profile || "—";
 
   // Normalize holdings array defensively
   const holdings: Holding[] = useMemo(() => {
@@ -206,22 +209,9 @@ export default function ResultsClient() {
       .filter((r) => r.symbol && Number.isFinite(r.weight));
   }, [preview]);
 
-  // ── Compute → curve down → cap → half-step string
-  const gradeNumRaw = useMemo(() => {
-    const ga = Number(preview?.grade_adjusted);
-    const gb = Number(preview?.grade_base);
-    if (Number.isFinite(ga)) return ga;
-    if (Number.isFinite(gb)) return gb;
-    return computeFinalGrade(profile, holdings);
-  }, [preview, holdings, profile]);
+  // ❗ Always compute client-side from holdings; ignore preview.grade_* here
+  const gradeNum = useMemo(() => computeFinalGrade(profile, holdings), [profile, holdings]);
 
-  // Downshift + compress toward 1.0 to avoid everything clustering near 4.5
-  // adjusted = 1 + ( (raw + bias) - 1 ) * scale
-  const bias = -0.35;   // subtract ~0.35 stars overall
-  const scale = 1.10;   // compress spread by 10%
-  const curved = 1 + ((Number(gradeNumRaw) + bias) - 1) * scale;
-
-  const gradeNum = Math.max(1, Math.min(MAX_GRADE, curved)); // cap at 4.5 max, floor at 1
   const grade = useMemo(
     () => (Number.isFinite(gradeNum) ? formatGradeHalfStar(gradeNum) : "—"),
     [gradeNum]
@@ -232,15 +222,31 @@ export default function ResultsClient() {
     [holdings]
   );
 
-  // Share uses the SAME displayed grade string to keep OG/download/pdf consistent
+  // Helper for social links once shareUrl exists
+  const enc = (s: string) => encodeURIComponent(s);
+  const xUrl = shareUrl
+    ? `https://twitter.com/intent/tweet?text=${enc("Just got my 401(k) graded on GradeYour401k!")}&url=${enc(
+        shareUrl
+      )}`
+    : "";
+  const liUrl = shareUrl
+    ? `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}`
+    : "";
+  const fbUrl = shareUrl
+    ? `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}`
+    : "";
+
+  // Create share using the SAME computed grade number
   async function handleMakeShareLink() {
     try {
       setShareError(null);
       if (!preview) return;
-      const provider = (preview.provider_display || preview.provider || "").toString();
-      const profile = (preview.profile || "").toString();
 
-      if (!provider || !profile || grade === "—") {
+      const provider = (preview.provider_display || preview.provider || "").toString();
+      const prof = (preview.profile || "").toString();
+      const gradeNumber = Number(gradeNum);
+
+      if (!provider || !prof || !Number.isFinite(gradeNumber) || gradeNumber <= 0) {
         setShareError("Grade not ready to share.");
         return;
       }
@@ -252,8 +258,8 @@ export default function ResultsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider,
-          profile,
-          grade, // already half-step & capped
+          profile: prof,
+          grade: (Math.round(gradeNumber * 10) / 10).toFixed(1), // e.g., "3.8"
           as_of_date: new Date().toISOString().slice(0, 10),
         }),
       });
@@ -292,20 +298,6 @@ export default function ResultsClient() {
     a.click();
     URL.revokeObjectURL(url);
   }
-
-  // Helper for social links once shareUrl exists
-  const enc = (s: string) => encodeURIComponent(s);
-  const xUrl = shareUrl
-    ? `https://twitter.com/intent/tweet?text=${enc("Just got my 401(k) graded on GradeYour401k!")}&url=${enc(
-        shareUrl
-      )}`
-    : "";
-  const liUrl = shareUrl
-    ? `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}`
-    : "";
-  const fbUrl = shareUrl
-    ? `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}`
-    : "";
 
   return (
     <main className="mx-auto max-w-3xl p-6 space-y-8">
