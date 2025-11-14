@@ -26,7 +26,7 @@ export async function GET() {
         const raw = metrics?.asof || metrics?.as_of || metrics?.date || todayISO();
         asof = String(raw).slice(0, 10);
 
-        // ── Fear & Greed: upsert into your fear_greed_cache table
+        // ── Fear & Greed → upsert into your fear_greed_cache WITHOUT ON CONFLICT
         const fgRaw =
           metrics?.fear_greed ??
           metrics?.fearGreed ??
@@ -34,15 +34,30 @@ export async function GET() {
           null;
         const fgNum = Number(fgRaw);
         if (Number.isFinite(fgNum)) {
-          // Primary key/unique is assumed on (asof_date)
-          // Columns assumed: asof_date (date), reading (int/float)
-          await query(
-            `INSERT INTO fear_greed_cache (asof_date, reading)
-             VALUES ($1, $2)
-             ON CONFLICT (asof_date) DO UPDATE
-               SET reading = EXCLUDED.reading`,
-            [asof, fgNum]
+          // Check if a row exists for this asof_date
+          const existing: any = await query(
+            `SELECT 1 FROM fear_greed_cache WHERE asof_date = $1 LIMIT 1`,
+            [asof]
           );
+
+          const exists =
+            Array.isArray((existing as any)?.rows)
+              ? (existing as any).rows.length > 0
+              : Array.isArray(existing)
+              ? existing.length > 0
+              : false;
+
+          if (exists) {
+            await query(
+              `UPDATE fear_greed_cache SET reading = $2 WHERE asof_date = $1`,
+              [asof, fgNum]
+            );
+          } else {
+            await query(
+              `INSERT INTO fear_greed_cache (asof_date, reading) VALUES ($1, $2)`,
+              [asof, fgNum]
+            );
+          }
         }
       } else {
         console.warn(
@@ -64,28 +79,78 @@ export async function GET() {
       for (const profile of profiles) {
         const snapshot = await buildProviderProfileModel({ asof, provider, profile });
 
-        // Header: ensure a row exists for this snapshot_id
-        await query(
-          `INSERT INTO model_snapshots (snapshot_id, asof_date, provider, profile, is_approved, notes)
-           VALUES ($1, $2, $3, $4, true, $5)
-           ON CONFLICT (snapshot_id) DO UPDATE
-             SET notes = EXCLUDED.notes`,
-          [snapshot.id, asof, provider, profile, snapshot.notes || null]
-        );
+        // ── model_snapshots: UPDATE-then-INSERT (no ON CONFLICT required)
+        {
+          const existing: any = await query(
+            `SELECT 1 FROM model_snapshots WHERE snapshot_id = $1 LIMIT 1`,
+            [snapshot.id]
+          );
+          const exists =
+            Array.isArray((existing as any)?.rows)
+              ? (existing as any).rows.length > 0
+              : Array.isArray(existing)
+              ? existing.length > 0
+              : false;
 
-        // Lines: UPSERT each (snapshot_id, rank) to avoid PK duplicate on reruns/concurrency
+          if (exists) {
+            await query(
+              `UPDATE model_snapshots
+                 SET asof_date = $2,
+                     provider  = $3,
+                     profile   = $4,
+                     is_approved = true,
+                     notes     = $5
+               WHERE snapshot_id = $1`,
+              [snapshot.id, asof, provider, profile, snapshot.notes || null]
+            );
+          } else {
+            await query(
+              `INSERT INTO model_snapshots
+                 (snapshot_id, asof_date, provider, profile, is_approved, notes)
+               VALUES ($1, $2, $3, $4, true, $5)`,
+              [snapshot.id, asof, provider, profile, snapshot.notes || null]
+            );
+          }
+        }
+
+        // ── model_snapshot_lines: for each rank, UPDATE if exists else INSERT
         if (snapshot.lines && snapshot.lines.length) {
           for (let i = 0; i < snapshot.lines.length; i++) {
+            const rank = i + 1;
             const ln = snapshot.lines[i];
-            await query(
-              `INSERT INTO model_snapshot_lines (snapshot_id, rank, symbol, weight, role)
-               VALUES ($1, $2, $3, $4, $5)
-               ON CONFLICT (snapshot_id, rank) DO UPDATE
-                 SET symbol = EXCLUDED.symbol,
-                     weight = EXCLUDED.weight,
-                     role   = EXCLUDED.role`,
-              [snapshot.id, i + 1, ln.symbol, ln.weight, ln.role]
+
+            const existingLine: any = await query(
+              `SELECT 1
+                 FROM model_snapshot_lines
+                WHERE snapshot_id = $1 AND rank = $2
+                LIMIT 1`,
+              [snapshot.id, rank]
             );
+
+            const lineExists =
+              Array.isArray((existingLine as any)?.rows)
+                ? (existingLine as any).rows.length > 0
+                : Array.isArray(existingLine)
+                ? existingLine.length > 0
+                : false;
+
+            if (lineExists) {
+              await query(
+                `UPDATE model_snapshot_lines
+                    SET symbol = $3,
+                        weight = $4,
+                        role   = $5
+                  WHERE snapshot_id = $1 AND rank = $2`,
+                [snapshot.id, rank, ln.symbol, ln.weight, ln.role]
+              );
+            } else {
+              await query(
+                `INSERT INTO model_snapshot_lines
+                   (snapshot_id, rank, symbol, weight, role)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [snapshot.id, rank, ln.symbol, ln.weight, ln.role]
+              );
+            }
           }
         }
       }
