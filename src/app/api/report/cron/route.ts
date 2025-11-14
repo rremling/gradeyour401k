@@ -155,11 +155,19 @@ export async function GET(req: NextRequest) {
   // Auth: Vercel Cron injects Authorization: Bearer <CRON_SECRET>
   const expected = `Bearer ${process.env.CRON_SECRET || ""}`;
   const auth = req.headers.get("authorization") || "";
-  if (!process.env.CRON_SECRET || auth !== expected) {
+  const url = new URL(req.url);
+  const qsSecret = url.searchParams.get("secret") || "";
+
+  // Accept either:
+  //  - Authorization: Bearer <CRON_SECRET>   (Vercel Cron)
+  //  - ?secret=<CRON_SECRET>                (manual browser test)
+  const headerOk = auth === expected;
+  const queryOk = !!process.env.CRON_SECRET && qsSecret === process.env.CRON_SECRET;
+
+  if (!process.env.CRON_SECRET || (!headerOk && !queryOk)) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const url = new URL(req.url);
   const dryRun = url.searchParams.get("dry") === "1";
 
   try {
