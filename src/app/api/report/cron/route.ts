@@ -151,14 +151,22 @@ function buildOneTimeStyleHtml(args: {
 
 /** ─────────────────────────  Handler  ────────────────────── **/
 export async function GET(req: NextRequest) {
-  // Auth: Vercel Cron injects Authorization: Bearer <CRON_SECRET>
-  const expected = `Bearer ${process.env.CRON_SECRET || ""}`;
-  const auth = req.headers.get("authorization") || "";
-  if (!process.env.CRON_SECRET || auth !== expected) {
-    return new NextResponse("Unauthorized", { status: 401 });
+  // ────────────────────────────────────────────────────────────────
+  // Auth: allow either header (Bearer) or ?secret= param for Vercel Cron
+  // ────────────────────────────────────────────────────────────────
+  const envSecret = process.env.CRON_SECRET || "";
+  const url = new URL(req.url);
+  const qSecret = url.searchParams.get("secret") || "";
+  const hAuth = req.headers.get("authorization") || "";
+
+  if (envSecret) {
+    const okByHeader = hAuth === `Bearer ${envSecret}`;
+    const okByQuery  = qSecret === envSecret;
+    if (!okByHeader && !okByQuery) {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
   }
 
-  const url = new URL(req.url);
   const dryRun = url.searchParams.get("dry") === "1";
 
   try {
@@ -195,7 +203,7 @@ export async function GET(req: NextRequest) {
       due_kind: "q1" | "q2" | "q3";
     }>(rawDue);
 
-    console.log("[cron] candidates", { count: due.length });
+    console.log("[cron] candidates]", { count: due.length });
 
     let processed = 0;
     const failures: Array<{ id: number; error: string }> = [];
