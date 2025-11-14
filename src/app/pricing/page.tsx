@@ -342,24 +342,24 @@ export default function PricingPage() {
         </div>
       </section>
 
-      {/* RIA Agreement */}
-      <div ref={riaRef} className="rounded-lg border p-4 bg-white">
-        <label className="flex items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-1 h-4 w-4"
-            checked={riaAccepted}
-            onChange={(e) => setRiaAccepted(e.target.checked)}
-          />
-          <span>
-            I agree to the{" "}
-            <Link href="/legal/ria" className="text-blue-600 hover:underline" target="_blank">
-              RIA Agreement
-            </Link>{" "}
-            (Kenai Investments Inc., 2700 S Western Suite 900, Amarillo, TX — www.kenaiinvest.com).
-          </span>
-        </label>
-      </div>
+     {/* RIA Agreement */}
+<div ref={riaRef} className="rounded-lg border p-4 bg-white">
+  <label className="flex items-start gap-3 text-sm">
+    <input
+      type="checkbox"
+      className="mt-1 h-4 w-4"
+      checked={riaAccepted}
+      onChange={(e) => setRiaAccepted(e.target.checked)}
+    />
+    <span>
+      I agree to the{" "}
+      <Link href="/legal/ria" className="text-blue-600 hover:underline">
+        RIA Agreement
+      </Link>{" "}
+      (Kenai Investments Inc., 2700 S Western Suite 900, Amarillo, TX — www.kenaiinvest.com).
+    </span>
+  </label>
+</div>
 
       {/* Promo code (bottom) */}
       <div className="rounded-lg border p-4 bg-white">
