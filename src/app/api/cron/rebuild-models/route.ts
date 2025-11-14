@@ -26,7 +26,7 @@ export async function GET() {
         const raw = metrics?.asof || metrics?.as_of || metrics?.date || todayISO();
         asof = String(raw).slice(0, 10);
 
-        // Persist Fear & Greed if present (no-op if not provided)
+        // ── Fear & Greed: upsert into your fear_greed_cache table
         const fgRaw =
           metrics?.fear_greed ??
           metrics?.fearGreed ??
@@ -34,8 +34,10 @@ export async function GET() {
           null;
         const fgNum = Number(fgRaw);
         if (Number.isFinite(fgNum)) {
+          // Primary key/unique is assumed on (asof_date)
+          // Columns assumed: asof_date (date), reading (int/float)
           await query(
-            `INSERT INTO model_fear_greed (asof_date, reading)
+            `INSERT INTO fear_greed_cache (asof_date, reading)
              VALUES ($1, $2)
              ON CONFLICT (asof_date) DO UPDATE
                SET reading = EXCLUDED.reading`,
@@ -44,13 +46,13 @@ export async function GET() {
         }
       } else {
         console.warn(
-          "[rebuild-models] runDailyMetricsPipeline not found; using fallback asof",
+          "[rebuild-models] runDailyMetricsPipeline not found; using fallback asof"
         );
       }
     } catch (e: any) {
       console.warn(
         "[rebuild-models] dynamic import of lib/data failed; using fallback asof:",
-        e?.message || e,
+        e?.message || e
       );
     }
 
@@ -62,28 +64,27 @@ export async function GET() {
       for (const profile of profiles) {
         const snapshot = await buildProviderProfileModel({ asof, provider, profile });
 
-        // Insert snapshot header (ignore if already exists)
+        // Header: ensure a row exists for this snapshot_id
         await query(
           `INSERT INTO model_snapshots (snapshot_id, asof_date, provider, profile, is_approved, notes)
            VALUES ($1, $2, $3, $4, true, $5)
-           ON CONFLICT DO NOTHING`,
-          [snapshot.id, asof, provider, profile, snapshot.notes || null],
+           ON CONFLICT (snapshot_id) DO UPDATE
+             SET notes = EXCLUDED.notes`,
+          [snapshot.id, asof, provider, profile, snapshot.notes || null]
         );
 
-        // **NEW**: Clear existing lines for this snapshot to avoid PK duplicate
-        await query(
-          `DELETE FROM model_snapshot_lines WHERE snapshot_id = $1`,
-          [snapshot.id]
-        );
-
-        // Insert snapshot lines (fresh)
+        // Lines: UPSERT each (snapshot_id, rank) to avoid PK duplicate on reruns/concurrency
         if (snapshot.lines && snapshot.lines.length) {
           for (let i = 0; i < snapshot.lines.length; i++) {
             const ln = snapshot.lines[i];
             await query(
               `INSERT INTO model_snapshot_lines (snapshot_id, rank, symbol, weight, role)
-               VALUES ($1, $2, $3, $4, $5)`,
-              [snapshot.id, i + 1, ln.symbol, ln.weight, ln.role],
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (snapshot_id, rank) DO UPDATE
+                 SET symbol = EXCLUDED.symbol,
+                     weight = EXCLUDED.weight,
+                     role   = EXCLUDED.role`,
+              [snapshot.id, i + 1, ln.symbol, ln.weight, ln.role]
             );
           }
         }
@@ -95,7 +96,7 @@ export async function GET() {
     console.error("[cron/rebuild-models] error:", e?.message || e);
     return NextResponse.json(
       { ok: false, error: e?.message || String(e) },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
