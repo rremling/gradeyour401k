@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 import { getMarketRegime } from "@/lib/market";
 import { generatePdfBuffer } from "@/lib/pdf";
-import { fetchLatestModel } from "@/lib/models-client"; // ✅ NEW
+import { fetchLatestModel } from "@/lib/models-client"; // <-- NEW
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -165,7 +165,7 @@ export async function GET(req: NextRequest) {
   try {
     console.log("[cron] start", { dryRun });
 
-    // Include preview_id so we can pull real holdings + grade
+    // Select annual orders due for Q1/Q2/Q3 that haven't been sent
     const rawDue = await query(`
       WITH candidates AS (
         SELECT
@@ -173,7 +173,6 @@ export async function GET(req: NextRequest) {
           email,
           provider,
           profile,
-          preview_id,
           CASE
             WHEN next_due_1 IS NOT NULL AND q1_sent_at IS NULL AND next_due_1 <= NOW() THEN 'q1'
             WHEN next_due_2 IS NOT NULL AND q2_sent_at IS NULL AND next_due_2 <= NOW() THEN 'q2'
@@ -183,7 +182,7 @@ export async function GET(req: NextRequest) {
         FROM public.orders
         WHERE plan_key = 'annual'
       )
-      SELECT id, email, provider, profile, preview_id, due_kind
+      SELECT id, email, provider, profile, due_kind
       FROM candidates
       WHERE due_kind IS NOT NULL
       LIMIT 20;
@@ -194,7 +193,6 @@ export async function GET(req: NextRequest) {
       email: string | null;
       provider: string | null;
       profile: string | null;
-      preview_id: string | null;
       due_kind: "q1" | "q2" | "q3";
     }>(rawDue);
 
@@ -207,67 +205,39 @@ export async function GET(req: NextRequest) {
       try {
         if (!row || !row.email) throw new Error("missing email");
 
-        // Default to order values; prefer preview values if present
-        let provider = (row.provider ?? "").trim();
-        let profile = (row.profile ?? "Balanced").trim();
-        let holdings: Array<{ symbol: string; weight: number }> = [];
-        let grade: number | null = null;
-        let reportDateISO: string | undefined = undefined;
+        const provider = (row.provider ?? "").trim();
+        const profile = (row.profile ?? "Balanced").trim();
 
-        if (row.preview_id) {
-          const pRes = await query(
-            `SELECT provider, provider_display, profile, "rows", grade_base, grade_adjusted, created_at
-               FROM public.previews
-              WHERE id::text = $1
-              LIMIT 1`,
-            [row.preview_id]
-          );
-          const p = asRows<any>(pRes)[0];
-          if (p) {
-            provider = (p.provider_display || p.provider || provider || "").trim();
-            profile = (p.profile || profile || "Balanced").trim();
+        // Quarterly update emails do not include the user's exact current holdings.
+        // Keep grade null (template shows "—"), but DO attach the current recommended model + F&G.
+        const grade: number | null = null;
+        const holdings: Array<{ symbol: string; weight: number }> = [];
 
-            // rows can be JSON or array
-            const rawRows = p.rows;
-            try {
-              holdings = Array.isArray(rawRows) ? rawRows : JSON.parse(rawRows ?? "[]");
-            } catch {
-              holdings = [];
-            }
-
-            const toNum = (v: any) => {
-              const n = Number(v);
-              return Number.isFinite(n) ? n : null;
-            };
-            grade = toNum(p.grade_adjusted) ?? toNum(p.grade_base);
-            reportDateISO = p.created_at ? String(p.created_at) : undefined;
-          }
-        }
-
-        // Ensure regime computed (safe no-op if unused)
+        // Ensure market libs are warmed (optional)
         await getMarketRegime().catch(() => null);
 
-        // Fetch recommended model for PDF “Recommended Holdings”
-        let model = null as any;
+        // NEW: fetch latest model + fear/greed for this provider/profile
+        let model: Awaited<ReturnType<typeof fetchLatestModel>> | null = null;
         try {
           model = await fetchLatestModel(provider, profile);
         } catch {
           model = null;
         }
 
+        // Build PDF (now with recommended holdings + live F&G when available)
         const pdfBytes = await generatePdfBuffer({
-          provider,
-          profile,
+          provider: provider || "",
+          profile: profile || "",
           grade,
           holdings,
           logoUrl: "https://i.imgur.com/DMCbj99.png",
           clientName: profile || undefined,
-          reportDate: reportDateISO || new Date().toISOString(),
+          reportDate: new Date().toISOString(),
           ...(model
             ? ({
                 model_asof: model.asof,
                 model_lines: model.lines,
-                model_fear_greed: model.fear_greed,
+                model_fear_greed: model.fear_greed, // { asof_date, reading } | null
               } as any)
             : ({} as any)),
         });
@@ -296,6 +266,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Log success run in cron_log
     await query(
       `INSERT INTO cron_log (job_name, ran_at) VALUES ($1, NOW())`,
       ["report-cron"]
