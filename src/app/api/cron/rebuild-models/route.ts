@@ -34,7 +34,6 @@ export async function GET() {
           null;
         const fgNum = Number(fgRaw);
         if (Number.isFinite(fgNum)) {
-          // Check if a row exists for this asof_date
           const existing: any = await query(
             `SELECT 1 FROM fear_greed_cache WHERE asof_date = $1 LIMIT 1`,
             [asof]
@@ -113,44 +112,20 @@ export async function GET() {
           }
         }
 
-        // ── model_snapshot_lines: for each rank, UPDATE if exists else INSERT
+        // ── model_snapshot_lines: **DELETE existing rows for this snapshot_id, then INSERT fresh**
+        await query(
+          `DELETE FROM model_snapshot_lines WHERE snapshot_id = $1`,
+          [snapshot.id]
+        );
+
         if (snapshot.lines && snapshot.lines.length) {
           for (let i = 0; i < snapshot.lines.length; i++) {
-            const rank = i + 1;
             const ln = snapshot.lines[i];
-
-            const existingLine: any = await query(
-              `SELECT 1
-                 FROM model_snapshot_lines
-                WHERE snapshot_id = $1 AND rank = $2
-                LIMIT 1`,
-              [snapshot.id, rank]
+            await query(
+              `INSERT INTO model_snapshot_lines (snapshot_id, rank, symbol, weight, role)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [snapshot.id, i + 1, ln.symbol, ln.weight, ln.role]
             );
-
-            const lineExists =
-              Array.isArray((existingLine as any)?.rows)
-                ? (existingLine as any).rows.length > 0
-                : Array.isArray(existingLine)
-                ? existingLine.length > 0
-                : false;
-
-            if (lineExists) {
-              await query(
-                `UPDATE model_snapshot_lines
-                    SET symbol = $3,
-                        weight = $4,
-                        role   = $5
-                  WHERE snapshot_id = $1 AND rank = $2`,
-                [snapshot.id, rank, ln.symbol, ln.weight, ln.role]
-              );
-            } else {
-              await query(
-                `INSERT INTO model_snapshot_lines
-                   (snapshot_id, rank, symbol, weight, role)
-                 VALUES ($1, $2, $3, $4, $5)`,
-                [snapshot.id, rank, ln.symbol, ln.weight, ln.role]
-              );
-            }
           }
         }
       }
