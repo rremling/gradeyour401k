@@ -25,6 +25,23 @@ export async function GET() {
         // accept YYYY-MM-DD or full ISO
         const raw = metrics?.asof || metrics?.as_of || metrics?.date || todayISO();
         asof = String(raw).slice(0, 10);
+
+        // Persist Fear & Greed if present (no-op if not provided)
+        const fgRaw =
+          metrics?.fear_greed ??
+          metrics?.fearGreed ??
+          metrics?.fg ??
+          null;
+        const fgNum = Number(fgRaw);
+        if (Number.isFinite(fgNum)) {
+          await query(
+            `INSERT INTO model_fear_greed (asof_date, reading)
+             VALUES ($1, $2)
+             ON CONFLICT (asof_date) DO UPDATE
+               SET reading = EXCLUDED.reading`,
+            [asof, fgNum]
+          );
+        }
       } else {
         console.warn(
           "[rebuild-models] runDailyMetricsPipeline not found; using fallback asof",
@@ -45,58 +62,28 @@ export async function GET() {
       for (const profile of profiles) {
         const snapshot = await buildProviderProfileModel({ asof, provider, profile });
 
-        // ── Find or create the header row for (asof, provider, profile) ──
-        // We DO NOT rely on a (asof_date, provider, profile) unique index.
-        // 1) Try to reuse an existing snapshot_id for this trio (so lines can be replaced cleanly)
-        const existing = await query(
-          `SELECT snapshot_id
-             FROM model_snapshots
-            WHERE asof_date = $1 AND provider = $2 AND profile = $3
-            LIMIT 1`,
-          [asof, provider, profile]
+        // Insert snapshot header (ignore if already exists)
+        await query(
+          `INSERT INTO model_snapshots (snapshot_id, asof_date, provider, profile, is_approved, notes)
+           VALUES ($1, $2, $3, $4, true, $5)
+           ON CONFLICT DO NOTHING`,
+          [snapshot.id, asof, provider, profile, snapshot.notes || null],
         );
 
-        let snapId: string;
+        // **NEW**: Clear existing lines for this snapshot to avoid PK duplicate
+        await query(
+          `DELETE FROM model_snapshot_lines WHERE snapshot_id = $1`,
+          [snapshot.id]
+        );
 
-        if (Array.isArray((existing as any)?.rows) && (existing as any).rows.length) {
-          // Reuse the existing snapshot_id for today/provider/profile
-          snapId = (existing as any).rows[0].snapshot_id;
-          // Keep header current (approved + latest notes)
-          await query(
-            `UPDATE model_snapshots
-                SET is_approved = true,
-                    notes = $2
-              WHERE snapshot_id = $1`,
-            [snapId, snapshot.notes || null]
-          );
-        } else {
-          // No header yet for this trio today — insert one using the model's suggested id
-          // Upsert on PK snapshot_id in case the id already exists for any reason
-          const inserted = await query(
-            `INSERT INTO model_snapshots (snapshot_id, asof_date, provider, profile, is_approved, notes)
-             VALUES ($1, $2, $3, $4, true, $5)
-             ON CONFLICT (snapshot_id)
-             DO UPDATE SET asof_date = EXCLUDED.asof_date,
-                           provider  = EXCLUDED.provider,
-                           profile   = EXCLUDED.profile,
-                           is_approved = true,
-                           notes = EXCLUDED.notes
-             RETURNING snapshot_id`,
-            [snapshot.id, asof, provider, profile, snapshot.notes || null]
-          );
-          snapId = (inserted as any).rows[0].snapshot_id;
-        }
-
-        // ── Replace lines for this snapshot_id ──
-        await query(`DELETE FROM model_snapshot_lines WHERE snapshot_id = $1`, [snapId]);
-
+        // Insert snapshot lines (fresh)
         if (snapshot.lines && snapshot.lines.length) {
           for (let i = 0; i < snapshot.lines.length; i++) {
             const ln = snapshot.lines[i];
             await query(
               `INSERT INTO model_snapshot_lines (snapshot_id, rank, symbol, weight, role)
                VALUES ($1, $2, $3, $4, $5)`,
-              [snapId, i + 1, ln.symbol, ln.weight, ln.role]
+              [snapshot.id, i + 1, ln.symbol, ln.weight, ln.role],
             );
           }
         }
